@@ -9,17 +9,20 @@ mimi3（mimo2api）是一个 Python/FastAPI 网关，把小米 AI Studio / MIMO 
 ## 常用命令
 
 ```powershell
+# 本项目 Python 固定使用该解释器
+$PY = "D:\\Program\\anaconda3\\envs\\mimi\\python.exe"
+
 # 安装依赖
-pip install -r requirements.txt
+& $PY -m pip install -r requirements.txt
 
 # 复制环境变量模板并编辑 WS_TUNNEL_URL 等配置
 Copy-Item env.example .env
 
 # 本地启动（推荐入口；会 load .env 并设置 MIMO2API_WS_URL）
-python main.py
+& $PY main.py
 
 # 语法/导入前的轻量检查（当前仓库没有测试套件或 lint 配置）
-python -m compileall main.py mimo2api
+& $PY -m compileall main.py mimo2api
 
 # Docker 构建并后台启动
 docker compose up -d --build

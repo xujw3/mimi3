@@ -48,7 +48,9 @@ MIMO_PROCESS_LOCK_PATH=/app/data/mimo2api.lock
 ## 前置条件
 一台拥有公网 ip 的机器，或者本机进行内网穿透。此为必备配置选项
 ```bash
-WS_TUNNEL_URL=ws://your-domain.com:8000/ws
+WS_TUNNEL_URL=wss://your-domain.com/ws
+# 建议同时设置内网节点接入密钥
+MIMO_NODE_TOKEN=replace-with-a-long-random-node-token
 ```
 
 ## 免责声明

@@ -43,9 +43,11 @@ from .audio_helpers import (
 from .auth import (
     get_webui_username,
     is_ai_auth_enabled,
+    is_node_auth_enabled,
     is_web_auth_enabled,
     require_ai_request,
     require_webui_request,
+    verify_node_token,
 )
 from .metrics_store import (
     METRICS_BUCKET_SECONDS,
@@ -177,6 +179,10 @@ if is_ai_auth_enabled():
     logger.info("🔐 AI API 鉴权已启用")
 if is_web_auth_enabled():
     logger.info(f"🔐 WebUI 鉴权已启用，登录用户: {get_webui_username()}")
+if is_node_auth_enabled():
+    logger.info("🔐 内网节点 WebSocket 鉴权已启用")
+else:
+    logger.warning("⚠️ 内网节点 WebSocket 鉴权未启用，公网部署请设置 MIMO_NODE_TOKEN")
 
 
 def is_ai_route(path: str) -> bool:
@@ -396,8 +402,27 @@ async def api_delete_model_mapping(model_name: str):
         return JSONResponse({"ok": True, "deleted": model_name})
     return JSONResponse({"error": f"模型 {model_name} 不在映射中"}, status_code=404)
 
+def extract_node_token(ws: WebSocket) -> str | None:
+    auth_header = ws.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+
+    for header_name in ("x-node-token", "x-api-key", "api-key"):
+        header_value = ws.headers.get(header_name, "").strip()
+        if header_value:
+            return header_value
+
+    return ws.query_params.get("token") or ws.query_params.get("node_token")
+
+
 @app.websocket("/ws")
 async def ws_tunnel(ws: WebSocket):
+    if not verify_node_token(extract_node_token(ws)):
+        client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
+        logger.warning(f"⛔ 拒绝未授权内网节点连接: {client_addr}")
+        await ws.close(code=1008)
+        return
+
     await ws.accept()
     client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
     state.active_clients.append(ws)
@@ -450,10 +475,16 @@ def get_next_client() -> WebSocket | None:
             available_clients.append(client)
     if not available_clients:
         return None
-    if state.current_client_index >= len(available_clients):
+    # 优先把新请求分配给当前 pending 最少的节点，避免慢节点继续堆积。
+    min_pending = min(len(state.ws_to_req_ids.get(id(client), set())) for client in available_clients)
+    least_busy_clients = [
+        client for client in available_clients
+        if len(state.ws_to_req_ids.get(id(client), set())) == min_pending
+    ]
+    if state.current_client_index >= len(least_busy_clients):
         state.current_client_index = 0
-    client = available_clients[state.current_client_index]
-    state.current_client_index = (state.current_client_index + 1) % len(available_clients)
+    client = least_busy_clients[state.current_client_index]
+    state.current_client_index = (state.current_client_index + 1) % len(least_busy_clients)
     return client
 
 
@@ -550,6 +581,7 @@ async def dispatch_to_node(*, method: str, path: str, body: str, log_label: str,
         first_msg = await asyncio.wait_for(queue.get(), timeout=NODE_RESPONSE_TIMEOUT)
     except asyncio.TimeoutError:
         record_attempt_finished(target_ws=target_ws, status_code=504, first_byte_latency_ms=(time.monotonic() - attempt_started_at) * 1000, success=False)
+        cleanup_pending_request(req_id)
         raise
 
     record_attempt_finished(
@@ -944,10 +976,14 @@ async def _forward_request(request: Request, path: str):
                         if msg.get("type") == "finish":
                             stream_succeeded = True
                             break
+                        elif msg.get("type") == "error":
+                            error_text = msg.get("body") or "节点返回错误"
+                            logger.warning(f"⚠️ 流式转发收到节点错误 [{current_req_id[:8]}]: {error_text}")
+                            record_error(route_key, 502, "节点流式返回错误", detail=error_text[:500])
+                            break
                         elif msg.get("type") == "chunk":
                             chunk_body = msg.get("body", "")
-                            if usage_data is None:
-                                usage_data = extract_usage_from_sse_chunk(chunk_body)
+                            usage_data = extract_usage_from_sse_chunk(chunk_body) or usage_data
                             yield chunk_body.encode("utf-8")
                 finally:
                     data_task.cancel()

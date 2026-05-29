@@ -16,6 +16,7 @@ WEBUI_SECRET_ENV = "MIMO_WEBUI_SECRET"
 WEBUI_SESSION_TTL_ENV = "MIMO_WEBUI_SESSION_TTL_SECONDS"
 WEBUI_COOKIE_NAME_ENV = "MIMO_WEBUI_COOKIE_NAME"
 WEBUI_COOKIE_SECURE_ENV = "MIMO_WEBUI_COOKIE_SECURE"
+NODE_TOKEN_ENV = "MIMO_NODE_TOKEN"
 
 
 def _read_env(name: str, default: str = "") -> str:
@@ -32,6 +33,23 @@ def is_web_auth_enabled() -> bool:
 
 def get_ai_api_key() -> str:
     return _read_env(AI_AUTH_ENV)
+
+
+def get_node_token() -> str:
+    return _read_env(NODE_TOKEN_ENV)
+
+
+def is_node_auth_enabled() -> bool:
+    return bool(get_node_token())
+
+
+def verify_node_token(candidate: str | None) -> bool:
+    expected = get_node_token()
+    if not expected:
+        return True
+    if not candidate:
+        return False
+    return secrets.compare_digest(candidate, expected)
 
 
 def get_webui_username() -> str:

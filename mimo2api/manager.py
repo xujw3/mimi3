@@ -16,12 +16,15 @@ import time
 import asyncio
 import logging
 import uuid
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import httpx
 import websockets
 
 # 手动重建信号
 rebuild_event = asyncio.Event()
+rebuild_generation = 0
+# 用户文件变更信号，用于 WebUI 新增/删除账号后唤醒 manager 重新扫描。
+users_changed_event = asyncio.Event()
 
 async def interruptible_sleep(seconds: int):
     """可被 rebuild_event 打断的 sleep"""
@@ -29,6 +32,16 @@ async def interruptible_sleep(seconds: int):
         await asyncio.wait_for(rebuild_event.wait(), timeout=seconds)
     except asyncio.TimeoutError:
         pass
+
+
+async def wait_users_reload_interval(seconds: int):
+    """等待下一轮用户目录扫描，可被用户文件变更事件提前唤醒。"""
+    try:
+        await asyncio.wait_for(users_changed_event.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        users_changed_event.clear()
 
 
 async def cancel_and_wait(tasks: list[asyncio.Task], timeout: float = 5.0) -> None:
@@ -46,7 +59,14 @@ async def cancel_and_wait(tasks: list[asyncio.Task], timeout: float = 5.0) -> No
 
 def trigger_rebuild():
     """供外部调用，触发所有账号强制重建"""
+    global rebuild_generation
+    rebuild_generation += 1
     rebuild_event.set()
+
+
+def trigger_users_reload():
+    """供 WebUI 调用，用户文件变更后唤醒 manager 重新扫描。"""
+    users_changed_event.set()
 
 # 配置日志格式
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(name)s] - %(levelname)s - %(message)s")
@@ -82,6 +102,19 @@ def load_all_users() -> dict:
     return users
 
 
+def _append_node_token_to_ws_url(ws_url: str) -> str:
+    node_token = os.environ.get("MIMO_NODE_TOKEN", "").strip()
+    if not node_token:
+        return ws_url
+
+    parts = urlsplit(ws_url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    query_keys = {key for key, _ in query_items}
+    if "token" not in query_keys and "node_token" not in query_keys:
+        query_items.append(("token", node_token))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+
+
 async def get_bridge_code() -> str:
     """读取本地 bridge 代码文本"""
     import re
@@ -95,6 +128,7 @@ async def get_bridge_code() -> str:
     ws_url = os.environ.get("MIMO2API_WS_URL")
     if not ws_url:
         raise ValueError("MIMO2API_WS_URL环境变量未配置")
+    ws_url = _append_node_token_to_ws_url(ws_url)
     # 动态把桥接脚本里面原来写死的 WS_URL 给替换掉，并返回修改后的代码块。
     code = code.replace("__WS_URL__", ws_url)
     return code
@@ -326,11 +360,13 @@ class NativeClawClient:
         
         # 等待后台 loop 处理 hello-ok 完成鉴权挂载
         for _ in range(50):
-            if self.connected: 
+            if self.connected:
                 return True
             await asyncio.sleep(0.1)
+        self.logger.warning("WebSocket 已建立但未收到 hello-ok，关闭本次连接后重试")
+        await self.close()
         return False
-        
+
     async def _ws_loop(self):
         try:
             async for message in self.ws:
@@ -422,6 +458,7 @@ class AccountManager:
         self.logger = logging.getLogger(f"Acc-{self.name}-{self.uid}")
         self.stagger_offset = stagger_offset
         self.is_first_round = True
+        self._seen_rebuild_generation = rebuild_generation
 
     async def get_instance_status(self) -> tuple[str, int]:
         """获取当前容器的状态和剩余时间(秒)"""
@@ -430,7 +467,7 @@ class AccountManager:
             async with httpx.AsyncClient() as c:
                 r = await c.get(url, cookies=self.cookies, headers=_aistudio_headers(), timeout=15)
                 data = r.json()
-                st = data.get("data", {}).get("status", "")
+                st = str(data.get("data", {}).get("status", "")).strip()
                 expire_ms = data.get("data", {}).get("expireTime")
                 if expire_ms:
                     remain_sec = max(0, int(int(expire_ms) / 1000 - time.time()))
@@ -447,6 +484,7 @@ class AccountManager:
             if await client.connect(wait_available=create):
                 self.logger.info("已成功通过 websocket 建联!")
                 return True
+            await client.close()
             self.logger.warning(f"由于网络或 API 限制连结无响应，{delay}秒后重试...")
             await asyncio.sleep(delay)
         self.logger.error("连接 Claw 超过最大重试次数")
@@ -478,6 +516,12 @@ class AccountManager:
     async def run_lifecycle(self):
         """核心流转逻辑"""
         while True:
+            force_rebuild = self._seen_rebuild_generation < rebuild_generation
+            if force_rebuild:
+                self._seen_rebuild_generation = rebuild_generation
+                self.logger.info("🔔 收到重建信号，本轮将跳过复用并强制重建实例。")
+            if rebuild_event.is_set():
+                rebuild_event.clear()
             self.logger.info("=== 启动新一轮 Claw 生命周期 (设定运行阈值 55 分钟) ===")
             client = NativeClawClient(self.ph, self.cookies, self.logger)
             try:
@@ -486,7 +530,7 @@ class AccountManager:
                 self.logger.info(f"探测现有云端实例状态: {st}, 剩余寿命: {remain_sec} 秒")
                 
                 # 若寿命大于 3 分钟且状态为 AVAILABLE，跳过新建
-                if st == "AVAILABLE" and remain_sec > 180:
+                if st == "AVAILABLE" and remain_sec > 180 and not force_rebuild:
                     self.logger.info(f"发现可用宿主环境！尝试直接免重启挂载接入...")
                     if await self.connect_with_retry(client, max_retries=3, delay=5, create=False):
                         bridge_code = await get_bridge_code()
@@ -509,14 +553,15 @@ class AccountManager:
                         self.logger.info(f"容器直接复用成功！等待休眠 {wait_time} 秒直至其快过期时再触发完整的强制重建...")
                         await interruptible_sleep(wait_time)
                         if rebuild_event.is_set():
-                            self.logger.info("🔔 收到手动重建信号，立即销毁重建！")
-                            rebuild_event.clear()
+                            self.logger.info("🔔 收到重建信号，下一轮将跳过复用并强制重建！")
                         continue
                     else:
                         self.logger.warning("虽然状态显示 AVAILABLE，但免重建重连失败！继续走全量摧毁新建流程...")
                 
                 # 1. 尝试主动销毁（残血或掉线的，均执行主动清场重来）
-                if st != "DESTROYED":
+                if st == "DESTROYED":
+                    self.logger.info("检测到现有实例已 DESTROYED，跳过销毁步骤并立即创建新实例。")
+                else:
                     await self.try_shutdown_instance(client, st)
                     client = NativeClawClient(self.ph, self.cookies, self.logger)
                     self.logger.info("准备强制主动销毁残余不再健康的 Claw 实例...")
@@ -591,20 +636,24 @@ class AccountManager:
                 await client.close()
                 await asyncio.sleep(60)
 
+USER_RELOAD_INTERVAL = 30
+
+
+def _user_fingerprint(user_info: dict) -> str:
+    tracked = {
+        "userId": user_info.get("userId", ""),
+        "serviceToken": user_info.get("serviceToken", ""),
+        "xiaomichatbot_ph": user_info.get("xiaomichatbot_ph", ""),
+        "name": user_info.get("name", ""),
+    }
+    return json.dumps(tracked, ensure_ascii=False, sort_keys=True)
+
+
 async def start_manager_tasks():
     logger.info("🚀 mimo2api 分布式并发账号池控制引擎 (Manager) 已点火启动!")
-    users = load_all_users()
-    if not users:
-        logger.error("非常遗憾, 你还没往 users 目录下存入有效的新版数据配置！")
-        return
-    
-    logger.info(f"共通过 users/ 扫描并成功重载入 {len(users)} 个授权用户预设账号。")
-    tasks = []
-    
-    # 为了避免所有账号同时进入强制销毁重建期导致空窗，引入 stagger 错峰分配策略
-    total_users = len(users)
-    max_stagger_window = 50 * 60 # 分摊在 50 分钟内
-    stagger_step = max_stagger_window // total_users if total_users > 1 else 0
+    tasks: dict[str, asyncio.Task] = {}
+    fingerprints: dict[str, str] = {}
+    no_user_logged = False
 
     async def _delayed_start(mgr, init_sleep):
         if init_sleep > 0:
@@ -612,16 +661,60 @@ async def start_manager_tasks():
         await mgr.run_lifecycle()
 
     try:
-        for i, (uid, user_info) in enumerate(users.items()):
-            stagger_offset = i * stagger_step
-            manager = AccountManager(uid, user_info, stagger_offset=stagger_offset)
-            # 初始启动小幅错开 3 秒，避免并发导致 API 短期拒绝
-            t = asyncio.create_task(_delayed_start(manager, i * 3.0), name=f"account-manager-{uid}")
-            tasks.append(t)
+        while True:
+            users = load_all_users()
+            if not users:
+                if not no_user_logged:
+                    logger.warning("users/ 目录下暂无有效账号，manager 将持续等待 WebUI 导入或文件变更。")
+                    no_user_logged = True
+                await cancel_and_wait(list(tasks.values()))
+                tasks.clear()
+                fingerprints.clear()
+                await wait_users_reload_interval(USER_RELOAD_INTERVAL)
+                continue
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+            if no_user_logged:
+                logger.info(f"检测到 {len(users)} 个有效账号，开始拉起账号守护任务。")
+                no_user_logged = False
+
+            # 移除已经从 users/ 删除的账号任务。
+            for uid in list(tasks):
+                if uid not in users:
+                    logger.info(f"账号 {uid} 已从 users/ 移除，停止对应守护任务。")
+                    await cancel_and_wait([tasks.pop(uid)])
+                    fingerprints.pop(uid, None)
+
+            total_users = len(users)
+            max_stagger_window = 50 * 60
+            stagger_step = max_stagger_window // total_users if total_users > 1 else 0
+
+            for i, (uid, user_info) in enumerate(users.items()):
+                fingerprint = _user_fingerprint(user_info)
+                existing_task = tasks.get(uid)
+                if existing_task is not None and existing_task.done():
+                    try:
+                        result = existing_task.result()
+                        logger.warning(f"账号 {uid} 守护任务意外结束: {result}")
+                    except Exception as exc:
+                        logger.error(f"账号 {uid} 守护任务异常退出，将自动重启: {exc}", exc_info=True)
+                    tasks.pop(uid, None)
+                    fingerprints.pop(uid, None)
+                    existing_task = None
+
+                if existing_task is None or fingerprints.get(uid) != fingerprint:
+                    if existing_task is not None:
+                        logger.info(f"账号 {uid} 凭证发生变化，重启对应守护任务。")
+                        await cancel_and_wait([existing_task])
+                    stagger_offset = i * stagger_step
+                    manager = AccountManager(uid, user_info, stagger_offset=stagger_offset)
+                    init_sleep = i * 3.0 if existing_task is None else 0
+                    tasks[uid] = asyncio.create_task(_delayed_start(manager, init_sleep), name=f"account-manager-{uid}")
+                    fingerprints[uid] = fingerprint
+                    logger.info(f"账号 {uid} 守护任务已启动/刷新。")
+
+            await wait_users_reload_interval(USER_RELOAD_INTERVAL)
     except asyncio.CancelledError:
-        await cancel_and_wait(tasks)
+        await cancel_and_wait(list(tasks.values()))
         raise
 
 async def main():
