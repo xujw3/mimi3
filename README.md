@@ -51,7 +51,19 @@ http://127.0.0.1:8000/webui
 
 ```bash
 cp env.example .env
-docker compose up -d --build
+docker compose up -d
+```
+
+默认 `docker-compose.yml` 使用远程镜像：
+
+```text
+kingxujw/mimi3:latest
+```
+
+如果需要本地构建镜像，使用 `docker-compose.local.yml`：
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
 查看日志：

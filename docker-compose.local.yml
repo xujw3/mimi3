@@ -1,7 +1,8 @@
 services:
   mimi3:
-    image: kingxujw/mimi3:latest
-    pull_policy: always
+    build:
+      context: .
+    image: mimi3:latest
     container_name: mimi3
     init: true
     restart: unless-stopped
