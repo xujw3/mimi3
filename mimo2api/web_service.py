@@ -173,7 +173,11 @@ NODE_RESPONSE_TIMEOUT = 30
 MAX_RETRIES = 3
 MAX_PENDING_QUEUES = 2000
 AI_ROUTE_PREFIXES = ("/v1/", "/anthropic/v1/")
-WEBUI_PUBLIC_PATHS = {"/", "/api/auth/session", "/api/auth/login", "/api/auth/logout", "/api/stats", "/api/status/history", "/webui"}
+WEBUI_PUBLIC_PATHS = {"/", "/api/auth/session", "/api/auth/login", "/api/auth/logout", "/webui"}
+MODEL_MAPPING_MAX_BYTES = 64 * 1024
+MODEL_MAPPING_MAX_ENTRIES = 500
+MODEL_NAME_MAX_LENGTH = 200
+MODEL_MAPPING_LOCK = asyncio.Lock()
 
 if is_ai_auth_enabled():
     logger.info("🔐 AI API 鉴权已启用")
@@ -340,7 +344,8 @@ async def api_stats():
 @app.get("/api/status/history")
 async def api_status_history(hours: int = 24):
     hours = max(1, min(hours, 24 * METRICS_RETENTION_DAYS))
-    return JSONResponse(content=await asyncio.to_thread(load_status_history, hours))
+    route_keys = sorted(list(state.metrics["routes"]))
+    return JSONResponse(content=await asyncio.to_thread(load_status_history, hours, route_keys))
 
 @app.get("/api/errors")
 async def api_errors(limit: int = 50):
@@ -357,10 +362,30 @@ def load_model_mapping() -> dict[str, str]:
     except (json.JSONDecodeError, OSError):
         return {}
 
+def validate_model_mapping(raw_mapping: Any) -> tuple[dict[str, str] | None, str | None]:
+    if not isinstance(raw_mapping, dict):
+        return None, "映射必须是 JSON 对象"
+    if len(raw_mapping) > MODEL_MAPPING_MAX_ENTRIES:
+        return None, f"映射数量不能超过 {MODEL_MAPPING_MAX_ENTRIES} 条"
+
+    mapping: dict[str, str] = {}
+    for source_model, target_model in raw_mapping.items():
+        if not isinstance(source_model, str) or not isinstance(target_model, str):
+            return None, "模型映射的 key/value 都必须是字符串"
+        source_model = source_model.strip()
+        target_model = target_model.strip()
+        if not source_model or not target_model:
+            return None, "模型名称不能为空"
+        if len(source_model) > MODEL_NAME_MAX_LENGTH or len(target_model) > MODEL_NAME_MAX_LENGTH:
+            return None, f"模型名称长度不能超过 {MODEL_NAME_MAX_LENGTH}"
+        mapping[source_model] = target_model
+    return mapping, None
+
+
 def save_model_mapping(mapping: dict[str, str]) -> None:
     tmp = MODEL_MAPPING_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), "utf-8")
-    tmp.rename(MODEL_MAPPING_FILE)
+    os.replace(tmp, MODEL_MAPPING_FILE)
 
 def apply_model_mapping(body_text: str) -> str:
     mapping = load_model_mapping()
@@ -379,27 +404,36 @@ def apply_model_mapping(body_text: str) -> str:
 
 @app.get("/api/model_mapping")
 async def api_get_model_mapping():
-    return JSONResponse(content=load_model_mapping())
+    async with MODEL_MAPPING_LOCK:
+        return JSONResponse(content=load_model_mapping())
 
 @app.put("/api/model_mapping")
 async def api_put_model_mapping(request: Request):
     body = await request.body()
+    if len(body) > MODEL_MAPPING_MAX_BYTES:
+        return JSONResponse({"error": f"\u8bf7\u6c42\u4f53\u4e0d\u80fd\u8d85\u8fc7 {MODEL_MAPPING_MAX_BYTES} \u5b57\u8282"}, status_code=413)
     try:
-        new_mapping = json.loads(body.decode("utf-8", "ignore").lstrip("\ufeff"))
+        raw_mapping = json.loads(body.decode("utf-8", "ignore").lstrip("\ufeff"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JSONResponse({"error": "请求体不是合法 JSON"}, status_code=400)
-    if not isinstance(new_mapping, dict):
-        return JSONResponse({"error": "映射必须是 JSON 对象"}, status_code=400)
-    save_model_mapping(new_mapping)
+    new_mapping, error = validate_model_mapping(raw_mapping)
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
+    async with MODEL_MAPPING_LOCK:
+        save_model_mapping(new_mapping or {})
     return JSONResponse(content=new_mapping)
 
 @app.delete("/api/model_mapping/{model_name:path}")
 async def api_delete_model_mapping(model_name: str):
-    mapping = load_model_mapping()
-    if model_name in mapping:
-        del mapping[model_name]
-        save_model_mapping(mapping)
-        return JSONResponse({"ok": True, "deleted": model_name})
+    model_name = model_name.strip()
+    if not model_name:
+        return JSONResponse({"error": "模型名称不能为空"}, status_code=400)
+    async with MODEL_MAPPING_LOCK:
+        mapping = load_model_mapping()
+        if model_name in mapping:
+            del mapping[model_name]
+            save_model_mapping(mapping)
+            return JSONResponse({"ok": True, "deleted": model_name})
     return JSONResponse({"error": f"模型 {model_name} 不在映射中"}, status_code=404)
 
 def extract_node_token(ws: WebSocket) -> str | None:
@@ -425,9 +459,11 @@ async def ws_tunnel(ws: WebSocket):
 
     await ws.accept()
     client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
+    node_id = ws.query_params.get("node_id") or f"{client_addr}#{id(ws)}"
     state.active_clients.append(ws)
+    state.ws_node_labels[id(ws)] = node_id
     state.client_cooldowns.pop(id(ws), None)
-    logger.info(f"✅ 内网节点已接入: {client_addr}。当前在线节点数: {len(state.active_clients)}")
+    logger.info(f"✅ 内网节点已接入: {node_id}。当前在线节点数: {len(state.active_clients)}")
     
     try:
         while True:
@@ -445,7 +481,8 @@ async def ws_tunnel(ws: WebSocket):
         if ws in state.active_clients:
             state.active_clients.remove(ws)
         state.client_cooldowns.pop(id(ws), None)
-        
+        state.ws_node_labels.pop(id(ws), None)
+
         # 清理该节点的所有孤儿队列
         orphan_ids = state.ws_to_req_ids.pop(id(ws), set())
         for orphan_id in orphan_ids:
@@ -588,7 +625,7 @@ async def dispatch_to_node(*, method: str, path: str, body: str, log_label: str,
         target_ws=target_ws,
         status_code=int(first_msg.get("status", 200)),
         first_byte_latency_ms=(time.monotonic() - attempt_started_at) * 1000,
-        success=first_msg.get("type") != "error" and not should_retry_status(int(first_msg.get("status", 200))),
+        success=first_msg.get("type") != "error" and int(first_msg.get("status", 200)) < 400,
     )
     return ForwardAttempt(req_id=req_id, queue=queue, target_ws=target_ws, first_msg=first_msg, attempt_number=attempt_number)
 
@@ -644,16 +681,30 @@ async def collect_response_body(current_req_id: str, current_queue: asyncio.Queu
         cleanup_pending_request(current_req_id)
     return "".join(chunks)
 
+
+def gateway_unavailable_response(route_key: str, started_at: float, is_streaming: bool) -> Response:
+    record_request_started(route_key, is_streaming=is_streaming)
+    record_request_finished(
+        route_key=route_key,
+        status_code=503,
+        started_at=started_at,
+        first_byte_at=None,
+        success=False,
+    )
+    return Response("Gateway Error: 没有可用的内网节点", status_code=503)
+
+
 # -------------- API 路由定义 --------------
 
 @app.post("/v1/audio/speech")
 async def audio_speech_handler(payload: AudioSpeechRequest):
-    if not state.active_clients:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
-
+    route_key = "/v1/audio/speech"
+    request_started_at = time.monotonic()
     input_text = payload.input.strip()
     if not input_text:
         return JSONResponse({"error": {"message": "`input` 不能为空"}}, status_code=400)
+    if not state.active_clients:
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=False)
 
     messages = []
     if isinstance(payload.instructions, str) and payload.instructions.strip():
@@ -669,11 +720,9 @@ async def audio_speech_handler(payload: AudioSpeechRequest):
     
     max_retries = min(MAX_RETRIES, get_available_client_count())
     if max_retries == 0:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
-        
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=False)
+
     retry_state = RetryState()
-    route_key = "/v1/audio/speech"
-    request_started_at = time.monotonic()
     record_request_started(route_key, is_streaming=False)
 
     for attempt in range(max_retries):
@@ -738,9 +787,8 @@ async def audio_speech_handler(payload: AudioSpeechRequest):
 
 @app.post("/v1/responses")
 async def responses_handler(request: Request):
-    if not state.active_clients:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
-
+    route_key = "/v1/responses"
+    request_started_at = time.monotonic()
     body = await request.body()
     try:
         req_body = json.loads(body.decode("utf-8", "ignore").lstrip("\ufeff"))
@@ -756,13 +804,13 @@ async def responses_handler(request: Request):
         chat_req["stream"] = True
 
     chat_body_text = json.dumps(chat_req, ensure_ascii=False)
+    if not state.active_clients:
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=is_streaming)
     max_retries = min(MAX_RETRIES, get_available_client_count())
     if max_retries == 0:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
-        
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=is_streaming)
+
     retry_state = RetryState()
-    route_key = "/v1/responses"
-    request_started_at = time.monotonic()
     record_request_started(route_key, is_streaming=is_streaming)
 
     for attempt in range(max_retries):
@@ -906,14 +954,8 @@ async def anthropic_messages_handler(request: Request):
     return await _forward_request(request, "/anthropic/v1/messages")
 
 async def _forward_request(request: Request, path: str):
-    if not state.active_clients:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
-
     body = await request.body()
     method = request.method
-    max_retries = min(MAX_RETRIES, get_available_client_count())
-    if max_retries == 0:
-        return Response("Gateway Error: 没有可用的内网节点", status_code=503)
 
     retry_state = RetryState()
     body_text = body.decode("utf-8", "ignore").lstrip("\ufeff")
@@ -926,6 +968,11 @@ async def _forward_request(request: Request, path: str):
         is_streaming = json.loads(body_text).get("stream", False) is True
     except (json.JSONDecodeError, AttributeError):
         pass
+    if not state.active_clients:
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=is_streaming)
+    max_retries = min(MAX_RETRIES, get_available_client_count())
+    if max_retries == 0:
+        return gateway_unavailable_response(route_key, request_started_at, is_streaming=is_streaming)
     record_request_started(route_key, is_streaming=is_streaming)
 
     for attempt in range(max_retries):

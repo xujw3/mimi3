@@ -6,6 +6,14 @@ services:
     container_name: mimi3
     init: true
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    tmpfs:
+      - /tmp
     env_file:
       - .env
     ports:

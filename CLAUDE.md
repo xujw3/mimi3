@@ -21,8 +21,11 @@ Copy-Item env.example .env
 # 本地启动（推荐入口；会 load .env 并设置 MIMO2API_WS_URL）
 & $PY main.py
 
-# 语法/导入前的轻量检查（当前仓库没有测试套件或 lint 配置）
-& $PY -m compileall main.py mimo2api
+# 语法/导入前的轻量检查
+& $PY -m compileall main.py mimo2api tests
+
+# 运行标准库 unittest 测试
+& $PY -m unittest discover -s tests
 
 # Docker 构建并后台启动
 docker compose up -d --build
@@ -32,7 +35,7 @@ docker compose logs -f mimi3
 docker compose down
 ```
 
-当前仓库没有 `pytest`、`ruff`、`mypy`、`black` 等配置，也没有 `tests/`。不要声称已运行单元测试或 lint；如需验证现有代码，优先运行 `python -m compileall main.py mimo2api`，或启动服务后用实际 HTTP/WebUI 流程做冒烟测试。
+当前仓库使用标准库 `unittest` 测试（`tests/`），没有 `pytest`、`ruff`、`mypy`、`black` 等配置。验证时优先运行 `& $PY -m compileall main.py mimo2api tests` 和 `& $PY -m unittest discover -s tests`；如涉及真实网关行为，再启动服务做 HTTP/WebUI 冒烟测试。
 
 ## 运行配置与数据文件
 

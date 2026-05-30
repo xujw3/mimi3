@@ -14,6 +14,7 @@ class GatewayState:
         self.ws_to_req_ids: Dict[int, set] = {}  # id(ws) -> {req_id, ...}
         self.req_id_to_ws_id: Dict[str, int] = {}
         self.req_id_timestamps: Dict[str, float] = {}
+        self.ws_node_labels: Dict[int, str] = {}
         self.current_client_index: int = 0
         self.rebuild_event: asyncio.Event = asyncio.Event()
         self.client_cooldowns: Dict[int, float] = {}

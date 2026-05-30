@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -16,10 +17,11 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 METRICS_DB_PATH = os.getenv("MIMO_METRICS_DB_PATH", os.path.join(ROOT_DIR, "gateway_metrics.db"))
 METRICS_SNAPSHOT_PATH = os.getenv("MIMO_METRICS_SNAPSHOT_PATH", os.path.join(ROOT_DIR, "gateway_snapshot.json"))
 METRICS_SNAPSHOT_INTERVAL = 60  # 每 60 秒保存一次
+logger = logging.getLogger(__name__)
 
 
 def node_label(ws: WebSocket) -> str:
-    return ws.client.host if ws.client else "Unknown"
+    return state.ws_node_labels.get(id(ws)) or (ws.client.host if ws.client else "Unknown")
 
 
 def _bump_counter(bucket: dict[str, Any], key: str, amount: int = 1) -> None:
@@ -417,8 +419,7 @@ async def flush_history_bucket(bucket_start: int) -> None:
 async def metrics_history_worker() -> None:
     # 启动时加载历史累积指标
     if load_cumulative_metrics():
-        import logging
-        logging.getLogger(__name__).info("📊 已从快照恢复累积指标")
+        logger.info("📊 已从快照恢复累积指标")
     state.metrics_history_last_snapshot = capture_metrics_snapshot()
     last_save = time.time()
     try:
@@ -429,16 +430,16 @@ async def metrics_history_worker() -> None:
             await flush_history_bucket(next_bucket_start - METRICS_BUCKET_SECONDS)
             # 定期保存累积指标
             if time.time() - last_save >= METRICS_SNAPSHOT_INTERVAL:
-                await asyncio.to_thread(save_cumulative_metrics)
+                await save_cumulative_metrics()
                 last_save = time.time()
     except asyncio.CancelledError:
         current_bucket_start = (int(time.time()) // METRICS_BUCKET_SECONDS) * METRICS_BUCKET_SECONDS
         await flush_history_bucket(current_bucket_start)
-        await asyncio.to_thread(save_cumulative_metrics)
+        await save_cumulative_metrics()
         raise
 
 
-def load_status_history(hours: int) -> dict[str, Any]:
+def load_status_history(hours: int, default_route_keys: list[str] | None = None) -> dict[str, Any]:
     now = int(time.time())
     bucket_span = max(1, hours * 3600)
     latest_complete_bucket = max(0, (now // METRICS_BUCKET_SECONDS) * METRICS_BUCKET_SECONDS - METRICS_BUCKET_SECONDS)
@@ -469,7 +470,8 @@ def load_status_history(hours: int) -> dict[str, Any]:
         conn.close()
 
     components: dict[tuple[str, str], dict[str, Any]] = {}
-    default_component_keys = [("gateway", "gateway")] + [("route", route_key) for route_key in sorted(state.metrics["routes"])]
+    route_keys = sorted(default_route_keys or [])
+    default_component_keys = [("gateway", "gateway")] + [("route", route_key) for route_key in route_keys]
     for component_type, component_key in default_component_keys:
         components[(component_type, component_key)] = {
             "component_type": component_type,
@@ -643,8 +645,8 @@ def build_gateway_stats(background_tasks_count: int) -> dict[str, Any]:
 
 # ─── 累积指标持久化 ───
 
-def save_cumulative_metrics() -> None:
-    """将当前累积指标保存到 JSON 文件"""
+def capture_cumulative_metrics_snapshot() -> dict[str, Any]:
+    """在事件循环线程中复制累积指标，避免后台线程遍历全局可变 dict。"""
     m = state.metrics
     data = {
         "saved_at": time.time(),
@@ -668,7 +670,7 @@ def save_cumulative_metrics() -> None:
         "routes": {},
         "nodes": {},
     }
-    for rk, rv in m["routes"].items():
+    for rk, rv in list(m["routes"].items()):
         data["routes"][rk] = {
             "requests_total": int(rv["requests_total"]),
             "requests_succeeded": int(rv["requests_succeeded"]),
@@ -680,7 +682,7 @@ def save_cumulative_metrics() -> None:
             "status_codes": dict(rv["status_codes"]),
             "tokens": {k: int(v) for k, v in rv["tokens"].items()},
         }
-    for nk, nv in m["nodes"].items():
+    for nk, nv in list(m["nodes"].items()):
         data["nodes"][nk] = {
             "attempts_total": int(nv["attempts_total"]),
             "attempts_succeeded": int(nv["attempts_succeeded"]),
@@ -689,13 +691,23 @@ def save_cumulative_metrics() -> None:
             "first_byte_latency_sum_ms": float(nv["first_byte_latency_sum_ms"]),
             "status_codes": dict(nv["status_codes"]),
         }
+    return data
+
+
+def write_cumulative_metrics_snapshot(data: dict[str, Any]) -> None:
     tmp = METRICS_SNAPSHOT_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, METRICS_SNAPSHOT_PATH)
+
+
+async def save_cumulative_metrics() -> None:
+    """将当前累积指标保存到 JSON 文件。"""
+    data = capture_cumulative_metrics_snapshot()
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, METRICS_SNAPSHOT_PATH)
-    except Exception:
-        pass
+        await asyncio.to_thread(write_cumulative_metrics_snapshot, data)
+    except Exception as exc:
+        logger.warning(f"保存指标快照失败: {exc}")
 
 
 def load_cumulative_metrics() -> bool:
@@ -705,7 +717,8 @@ def load_cumulative_metrics() -> bool:
     try:
         with open(METRICS_SNAPSHOT_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"加载指标快照失败: {exc}")
         return False
 
     m = state.metrics
