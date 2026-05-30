@@ -31,6 +31,19 @@ docker compose up -d --build
 
 默认服务端口为 `8000`，可在 `.env` 中通过 `SERVER_PORT` 调整。
 
+## GitHub Actions 镜像发布
+
+仓库包含 `.github/workflows/docker-publish.yml`，会在推送到 `master`/`main`、推送 `v*.*.*` 标签或手动触发时构建多架构镜像并推送到：
+
+- GHCR：`ghcr.io/<owner>/<repo>`
+- Docker Hub：`docker.io/<DOCKERHUB_USERNAME>/<repo>`（可用仓库变量 `DOCKERHUB_REPOSITORY` 覆盖镜像仓库名）
+
+需要在 GitHub 仓库 Secrets 中配置：
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+
+
 Docker Compose 会挂载以下本地目录：
 
 - `./users` -> `/app/users`
