@@ -16,6 +16,9 @@ oc_history.json
 users/*.json
 logs/
 data/
+gateway_metrics.db
+gateway_snapshot.json
+mimo2api.lock
 
 # 抓包归档可能含 Cookie/Token，默认不纳入版本库
 archive/http_captures/

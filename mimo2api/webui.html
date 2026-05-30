@@ -3,261 +3,739 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mimo2 控制面板</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>mimi3 Relay Deck</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('mimi3-theme') || 'light';
+                document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+            } catch (e) {
+                document.documentElement.dataset.theme = 'light';
+            }
+        })();
+    </script>
     <style>
         :root {
-            --primary: #4F46E5;
-            --primary-hover: #4338CA;
-            --danger: #EF4444;
-            --danger-hover: #DC2626;
-            --bg-color: #F3F4F6;
-            --card-bg: rgba(255, 255, 255, 0.75);
-            --card-border: rgba(255, 255, 255, 0.4);
-            --text-main: #111827;
-            --text-muted: #6B7280;
-            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-            --radius-md: 12px;
-            --radius-lg: 16px;
+            --bg: #07120f;
+            --bg-deep: #030706;
+            --panel: rgba(8, 24, 21, 0.78);
+            --panel-strong: rgba(12, 35, 30, 0.92);
+            --panel-soft: rgba(255, 255, 255, 0.035);
+            --line: rgba(171, 255, 212, 0.16);
+            --line-strong: rgba(171, 255, 212, 0.32);
+            --text: #e9fff5;
+            --muted: #86a99a;
+            --muted-2: #5f7c70;
+            --acid: #bcff5f;
+            --mint: #4fffc1;
+            --cyan: #74d6ff;
+            --amber: #ffb84d;
+            --danger: #ff5c7a;
+            --danger-deep: #39151d;
+            --ok: #34f5a4;
+            --warning: #ffcc66;
+            --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+            --shadow-soft: 0 18px 60px rgba(0, 0, 0, 0.24);
+            --radius-sm: 10px;
+            --radius-md: 18px;
+            --radius-lg: 28px;
+            --font-display: 'Azeret Mono', 'Noto Sans SC', monospace;
+            --font-body: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            min-height: 100%;
+            background: var(--bg-deep);
         }
 
         body {
             margin: 0;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: linear-gradient(135deg, #e0e7ff 0%, #f3f4f6 100%);
-            color: var(--text-main);
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 40px 20px;
-            box-sizing: border-box;
+            color: var(--text);
+            font-family: var(--font-body);
+            background:
+                radial-gradient(circle at 12% 8%, rgba(79, 255, 193, 0.18), transparent 34vw),
+                radial-gradient(circle at 88% 18%, rgba(188, 255, 95, 0.13), transparent 32vw),
+                radial-gradient(circle at 50% 110%, rgba(116, 214, 255, 0.12), transparent 38vw),
+                linear-gradient(145deg, #081914 0%, #050908 52%, #101009 100%);
+            overflow-x: hidden;
         }
 
-        .container {
-            width: 100%;
-            max-width: 900px;
-            display: flex;
-            flex-direction: column;
-            gap: 24px;
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            background:
+                linear-gradient(rgba(188, 255, 95, 0.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(188, 255, 95, 0.04) 1px, transparent 1px);
+            background-size: 44px 44px;
+            mask-image: radial-gradient(circle at center, black, transparent 78%);
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.28;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E");
+        }
+
+        button,
+        input,
+        textarea {
+            font: inherit;
         }
 
         .hidden {
             display: none !important;
         }
 
-        .auth-shell {
-            width: 100%;
-            max-width: 460px;
+        .shell {
+            position: relative;
+            z-index: 1;
+            width: min(1180px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 28px 0 42px;
         }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            gap: 12px;
+        .auth-page {
+            position: relative;
+            z-index: 1;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 26px;
         }
 
-        .header h1 {
+        .auth-card {
+            width: min(920px, 100%);
+            min-height: 520px;
+            display: grid;
+            grid-template-columns: 1.08fr 0.92fr;
+            border: 1px solid var(--line-strong);
+            border-radius: 34px;
+            overflow: hidden;
+            background: linear-gradient(145deg, rgba(8, 27, 23, 0.92), rgba(3, 8, 7, 0.94));
+            box-shadow: var(--shadow);
+        }
+
+        .auth-visual {
+            position: relative;
+            padding: 44px;
+            border-right: 1px solid var(--line);
+            background:
+                radial-gradient(circle at 30% 20%, rgba(79, 255, 193, 0.18), transparent 34%),
+                linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 42%);
+        }
+
+        .auth-visual::after {
+            content: '';
+            position: absolute;
+            right: -80px;
+            bottom: -70px;
+            width: 260px;
+            height: 260px;
+            border: 1px solid rgba(188, 255, 95, 0.32);
+            border-radius: 38% 62% 45% 55%;
+            transform: rotate(21deg);
+            box-shadow: inset 0 0 50px rgba(188, 255, 95, 0.08);
+        }
+
+        .brand-mark {
+            width: 54px;
+            height: 54px;
+            display: grid;
+            place-items: center;
+            color: #06100d;
+            font-family: var(--font-display);
+            font-weight: 700;
+            border-radius: 16px;
+            background: linear-gradient(135deg, var(--acid), var(--mint));
+            box-shadow: 0 0 28px rgba(188, 255, 95, 0.28);
+        }
+
+        .auth-visual h1,
+        .page-title h1 {
+            margin: 26px 0 10px;
+            font-family: var(--font-display);
+            font-size: clamp(34px, 7vw, 72px);
+            line-height: 0.92;
+            letter-spacing: -0.08em;
+            text-transform: uppercase;
+        }
+
+        .auth-visual p,
+        .page-title p {
+            max-width: 520px;
+            color: var(--muted);
+            line-height: 1.8;
             margin: 0;
-            font-size: 28px;
-            font-weight: 600;
-            color: #1e1b4b;
         }
 
-        .header-meta {
+        .signal-stack {
+            position: absolute;
+            left: 44px;
+            bottom: 42px;
+            display: grid;
+            gap: 12px;
+            width: min(360px, calc(100% - 88px));
+        }
+
+        .signal-line {
             display: flex;
             align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
+            justify-content: space-between;
+            gap: 16px;
+            color: var(--muted);
+            font-family: var(--font-display);
+            font-size: 12px;
+            letter-spacing: -0.04em;
+            text-transform: uppercase;
         }
 
-        .badge {
-            padding: 8px 12px;
-            border-radius: 999px;
+        .signal-line::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, var(--line-strong), transparent);
+        }
+
+        .auth-form-panel {
+            padding: 44px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: rgba(1, 5, 4, 0.34);
+        }
+
+        .eyebrow {
+            color: var(--acid);
+            font-family: var(--font-display);
             font-size: 12px;
             font-weight: 600;
-            background: rgba(255, 255, 255, 0.7);
-            color: #3730A3;
-            border: 1px solid rgba(79, 70, 229, 0.15);
-        }
-
-        .badge.warn {
-            color: #92400E;
-            border-color: rgba(245, 158, 11, 0.25);
-        }
-
-        .glass-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--card-border);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            box-shadow: var(--shadow);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .glass-card:hover {
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
-        }
-
-        .status-container {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .status-indicator {
-            width: 14px;
-            height: 14px;
-            background: #10B981;
-            border-radius: 50%;
-            box-shadow: 0 0 10px #10B981;
-            animation: pulse 2s infinite;
-        }
-
-        .status-indicator.offline {
-            background: #EF4444;
-            box-shadow: 0 0 10px #EF4444;
-            animation: none;
-        }
-
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-
-        .status-text {
-            font-size: 18px;
-            font-weight: 500;
-        }
-
-        .status-subtext {
-            color: var(--text-muted);
-            font-size: 14px;
-            margin-top: 4px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
         }
 
         .login-title {
-            margin: 0 0 8px 0;
-            font-size: 28px;
-            font-weight: 600;
-            color: #1e1b4b;
+            margin: 12px 0 12px;
+            font-family: var(--font-display);
+            font-size: 30px;
+            letter-spacing: -0.06em;
         }
 
         .login-copy {
-            margin: 0 0 24px 0;
-            color: var(--text-muted);
-            line-height: 1.6;
+            margin: 0 0 28px;
+            color: var(--muted);
+            line-height: 1.8;
         }
 
-        .auth-form {
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
+        .form-stack {
+            display: grid;
+            gap: 16px;
+        }
+
+        .field-label,
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .text-input,
+        .form-control {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            color: var(--text);
+            background: rgba(2, 11, 9, 0.72);
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
 
         .text-input {
-            width: 100%;
-            padding: 12px 14px;
-            border: 1px solid rgba(99, 102, 241, 0.18);
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.9);
-            font-size: 14px;
-            box-sizing: border-box;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            height: 48px;
+            padding: 0 15px;
         }
 
-        .text-input:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.08);
+        .text-input:focus,
+        .form-control:focus {
+            border-color: rgba(188, 255, 95, 0.68);
+            background: rgba(2, 14, 11, 0.9);
+            box-shadow: 0 0 0 4px rgba(188, 255, 95, 0.09);
         }
 
-        .flex-between {
+        .topbar {
             display: flex;
             justify-content: space-between;
+            gap: 22px;
+            align-items: flex-start;
+            margin-bottom: 22px;
+        }
+
+        .page-title {
+            display: flex;
+            align-items: flex-start;
+            gap: 18px;
+        }
+
+        .page-title h1 {
+            margin: 0 0 10px;
+            font-size: clamp(34px, 5vw, 58px);
+        }
+
+        .top-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 10px;
+            min-width: 320px;
+        }
+
+        .badge-row {
+            display: flex;
+            width: 100%;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .badge,
+        .chip {
+            display: inline-flex;
             align-items: center;
-            margin-bottom: 16px;
+            gap: 7px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.045);
+            color: var(--muted);
+            font-family: var(--font-display);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: -0.04em;
+            padding: 8px 11px;
+            white-space: nowrap;
+        }
+
+        .badge::before,
+        .chip::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--ok);
+            box-shadow: 0 0 14px var(--ok);
+        }
+
+        .badge.warn::before,
+        .chip.warn::before {
+            background: var(--warning);
+            box-shadow: 0 0 14px var(--warning);
+        }
+
+        .badge.danger::before,
+        .chip.danger::before {
+            background: var(--danger);
+            box-shadow: 0 0 14px var(--danger);
         }
 
         .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 10px 18px;
-            border-radius: var(--radius-md);
-            font-size: 14px;
-            font-weight: 500;
+            min-height: 40px;
+            border: 1px solid rgba(188, 255, 95, 0.34);
+            border-radius: 999px;
+            color: #06100d;
             cursor: pointer;
-            transition: all 0.2s ease;
+            padding: 9px 16px;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            justify-content: center;
+            gap: 8px;
+            font-family: var(--font-display);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            background: linear-gradient(135deg, var(--acid), var(--mint));
+            box-shadow: 0 10px 30px rgba(188, 255, 95, 0.13);
+            transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
         }
 
-        .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
-        .btn:active { transform: translateY(0); }
-        
-        .btn-danger { background: white; color: var(--danger); border: 1px solid #fca5a5; }
-        .btn-danger:hover { background: #fef2f2; color: var(--danger-hover); border-color: #f87171; }
+        .btn:hover {
+            transform: translateY(-1px);
+            filter: saturate(1.08);
+            box-shadow: 0 16px 38px rgba(188, 255, 95, 0.19);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-outline {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.045);
+            border-color: var(--line);
+            box-shadow: none;
+        }
+
+        .btn-outline:hover {
+            border-color: var(--line-strong);
+            background: rgba(255, 255, 255, 0.075);
+        }
+
+        .btn-danger {
+            color: #ffe6ec;
+            background: rgba(255, 92, 122, 0.12);
+            border-color: rgba(255, 92, 122, 0.4);
+            box-shadow: none;
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 92, 122, 0.2);
+            box-shadow: 0 12px 34px rgba(255, 92, 122, 0.12);
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: 1.4fr repeat(3, 1fr);
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .panel,
+        .metric-card {
+            position: relative;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-lg);
+            background: linear-gradient(145deg, var(--panel), rgba(2, 9, 8, 0.86));
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+
+        .panel::before,
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 35%);
+        }
+
+        .metric-card {
+            min-height: 156px;
+            padding: 20px;
+        }
+
+        .metric-card.primary {
+            border-color: rgba(188, 255, 95, 0.34);
+            background:
+                radial-gradient(circle at 90% 8%, rgba(188, 255, 95, 0.18), transparent 34%),
+                linear-gradient(145deg, rgba(9, 38, 31, 0.95), rgba(3, 9, 8, 0.88));
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-family: var(--font-display);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            margin-top: 18px;
+            color: var(--text);
+            font-family: var(--font-display);
+            font-size: clamp(28px, 5vw, 46px);
+            line-height: 1;
+            letter-spacing: -0.08em;
+        }
+
+        .metric-note {
+            margin-top: 14px;
+            color: var(--muted-2);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .status-orbit {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            align-items: center;
+            gap: 18px;
+            margin-top: 20px;
+        }
+
+        .status-indicator {
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--ok) 0 28%, rgba(52, 245, 164, 0.22) 30% 54%, transparent 55%);
+            border: 1px solid rgba(52, 245, 164, 0.45);
+            box-shadow: 0 0 34px rgba(52, 245, 164, 0.2);
+            animation: breathe 2.4s ease-in-out infinite;
+        }
+
+        .status-indicator.offline {
+            background: radial-gradient(circle, var(--danger) 0 28%, rgba(255, 92, 122, 0.22) 30% 54%, transparent 55%);
+            border-color: rgba(255, 92, 122, 0.48);
+            box-shadow: 0 0 32px rgba(255, 92, 122, 0.18);
+            animation: none;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(0.98); filter: brightness(0.92); }
+            50% { transform: scale(1.04); filter: brightness(1.12); }
+        }
+
+        .status-text {
+            font-family: var(--font-display);
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+        }
+
+        .status-subtext {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+            margin-top: 6px;
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 320px;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .panel-header {
+            position: relative;
+            z-index: 1;
+            padding: 22px 22px 0;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .panel-title {
+            margin: 0;
+            font-family: var(--font-display);
+            font-size: 18px;
+            letter-spacing: -0.06em;
+        }
+
+        .panel-copy {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
 
         .table-wrapper {
+            position: relative;
+            z-index: 1;
+            margin: 18px;
             overflow-x: auto;
-            border-radius: 8px;
-            border: 1px solid rgba(0,0,0,0.05);
+            border: 1px solid rgba(171, 255, 212, 0.1);
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.16);
         }
 
         table {
             width: 100%;
+            min-width: 760px;
             border-collapse: collapse;
             text-align: left;
-            background: rgba(255, 255, 255, 0.5);
         }
 
-        th, td {
-            padding: 14px 16px;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
+        th,
+        td {
+            padding: 16px;
+            border-bottom: 1px solid rgba(171, 255, 212, 0.08);
+            vertical-align: middle;
         }
 
         th {
-            background: rgba(243, 244, 246, 0.5);
-            font-weight: 600;
-            color: var(--text-muted);
-            font-size: 13px;
+            color: var(--muted-2);
+            background: rgba(255, 255, 255, 0.035);
+            font-family: var(--font-display);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+        }
+
+        tbody tr {
+            transition: background 0.16s ease;
+        }
+
+        tbody tr:hover {
+            background: rgba(188, 255, 95, 0.035);
         }
 
         td {
+            color: #d8f5e9;
             font-size: 14px;
-            color: #374151;
+        }
+
+        tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .mono {
+            font-family: var(--font-display);
+            letter-spacing: -0.04em;
+        }
+
+        .user-name {
+            color: var(--muted);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.045);
+            color: var(--muted);
+            font-family: var(--font-display);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .status-pill::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--warning);
+        }
+
+        .status-pill.available {
+            color: #caffdf;
+            border-color: rgba(52, 245, 164, 0.34);
+            background: rgba(52, 245, 164, 0.08);
+        }
+
+        .status-pill.available::before {
+            background: var(--ok);
+            box-shadow: 0 0 12px var(--ok);
+        }
+
+        .status-pill.expired,
+        .status-pill.error {
+            color: #ffd9e0;
+            border-color: rgba(255, 92, 122, 0.34);
+            background: rgba(255, 92, 122, 0.08);
+        }
+
+        .status-pill.expired::before,
+        .status-pill.error::before {
+            background: var(--danger);
+            box-shadow: 0 0 12px var(--danger);
+        }
+
+        .countdown-text,
+        .token-preview {
+            color: var(--muted-2);
+            font-family: var(--font-display);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .token-preview {
+            margin-top: 0;
+            display: inline-flex;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(171, 255, 212, 0.08);
         }
 
         .empty-state {
             text-align: center;
-            padding: 40px;
-            color: var(--text-muted);
-            font-size: 14px;
+            padding: 58px 24px;
+            color: var(--muted);
         }
 
-        /* Modal Styles */
+        .empty-state strong {
+            display: block;
+            color: var(--text);
+            margin-bottom: 6px;
+            font-family: var(--font-display);
+            letter-spacing: -0.04em;
+        }
+
+        .side-stack {
+            display: grid;
+            gap: 16px;
+        }
+
+        .side-card {
+            padding: 22px;
+        }
+
+        .side-list {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .side-item {
+            display: grid;
+            gap: 4px;
+            padding: 13px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(171, 255, 212, 0.08);
+        }
+
+        .side-item span {
+            color: var(--muted-2);
+            font-family: var(--font-display);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .side-item strong {
+            color: var(--text);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
         .modal-overlay {
             position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(4px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            inset: 0;
+            z-index: 1000;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0.58);
+            backdrop-filter: blur(14px);
             opacity: 0;
             visibility: hidden;
-            transition: all 0.3s ease;
-            z-index: 1000;
+            transition: opacity 0.22s ease, visibility 0.22s ease;
         }
 
         .modal-overlay.active {
@@ -266,172 +744,458 @@
         }
 
         .modal {
-            background: white;
-            width: 100%;
-            max-width: 480px;
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            transform: scale(0.95) translateY(10px);
-            transition: all 0.3s ease;
+            width: min(560px, 100%);
+            border: 1px solid var(--line-strong);
+            border-radius: 28px;
+            background: linear-gradient(145deg, rgba(8, 24, 21, 0.98), rgba(2, 7, 6, 0.98));
+            box-shadow: var(--shadow);
+            padding: 26px;
+            transform: translateY(14px) scale(0.98);
+            transition: transform 0.22s ease;
         }
 
         .modal-overlay.active .modal {
-            transform: scale(1) translateY(0);
+            transform: translateY(0) scale(1);
         }
 
-        .modal-title { margin: 0 0 16px 0; font-size: 20px; font-weight: 600; }
-        .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #374151; }
-        .form-control {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #D1D5DB;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 13px;
-            box-sizing: border-box;
-            transition: border-color 0.2s;
-            resize: vertical;
-            min-height: 100px;
+        .modal-title {
+            margin: 0 0 18px;
+            font-family: var(--font-display);
+            font-size: 22px;
+            letter-spacing: -0.06em;
         }
-        .form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
-        .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;}
-        
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-control {
+            min-height: 142px;
+            padding: 14px;
+            resize: vertical;
+            font-family: var(--font-display);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .form-hint {
+            margin-top: 8px;
+            color: var(--muted-2);
+            font-size: 12px;
+            line-height: 1.7;
+        }
+
+        .form-hint code {
+            color: var(--acid);
+            font-family: var(--font-display);
+        }
+
         .modal-actions {
             display: flex;
             justify-content: flex-end;
-            gap: 12px;
-            margin-top: 24px;
+            gap: 10px;
         }
-
-        .btn-outline { background: transparent; border: 1px solid #D1D5DB; color: #4B5563; }
-        .btn-outline:hover { background: #F3F4F6; }
 
         .toast {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: white;
-            border-left: 4px solid var(--primary);
-            padding: 12px 20px;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            transform: translateX(120%);
-            transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            right: 22px;
+            bottom: 22px;
             z-index: 2000;
+            max-width: min(420px, calc(100% - 44px));
+            padding: 14px 16px;
+            color: var(--text);
+            border: 1px solid var(--line-strong);
+            border-left: 4px solid var(--acid);
+            border-radius: 16px;
+            background: rgba(8, 24, 21, 0.96);
+            box-shadow: var(--shadow-soft);
+            transform: translateX(calc(100% + 40px));
+            transition: transform 0.28s cubic-bezier(.2, .85, .2, 1);
             font-size: 14px;
-            font-weight: 500;
         }
-        .toast.show { transform: translateX(0); }
-        .toast.error { border-left-color: var(--danger); color: var(--danger); }
-        .toast.success { border-left-color: #10B981; color: #047857; }
 
-        @media (max-width: 720px) {
-            body {
-                padding: 24px 14px;
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+
+        .toast.success {
+            border-left-color: var(--ok);
+        }
+
+        html[data-theme="light"] body {
+            --bg: #f5f0e6;
+            --bg-deep: #e7dfd1;
+            --panel: rgba(255, 252, 244, 0.82);
+            --panel-strong: rgba(255, 252, 244, 0.96);
+            --panel-soft: rgba(18, 60, 48, 0.045);
+            --line: rgba(33, 93, 72, 0.16);
+            --line-strong: rgba(33, 93, 72, 0.28);
+            --text: #17251f;
+            --muted: #5d7469;
+            --muted-2: #7e9188;
+            --acid: #5b8f21;
+            --mint: #008d68;
+            --cyan: #1b7896;
+            --amber: #b66a00;
+            --danger: #c5304c;
+            --danger-deep: #ffe8ee;
+            --ok: #008f62;
+            --warning: #bf7300;
+            --shadow: 0 24px 80px rgba(44, 35, 16, 0.16);
+            --shadow-soft: 0 16px 44px rgba(44, 35, 16, 0.10);
+            background:
+                radial-gradient(circle at 12% 8%, rgba(0, 141, 104, 0.13), transparent 34vw),
+                radial-gradient(circle at 88% 18%, rgba(218, 179, 84, 0.20), transparent 32vw),
+                radial-gradient(circle at 50% 110%, rgba(27, 120, 150, 0.11), transparent 38vw),
+                linear-gradient(145deg, #fbf7ed 0%, #eee6d8 54%, #f8f0dc 100%);
+        }
+
+        html[data-theme="light"] body::before {
+            background:
+                linear-gradient(rgba(33, 93, 72, 0.08) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(33, 93, 72, 0.07) 1px, transparent 1px);
+            opacity: 0.62;
+        }
+
+        html[data-theme="light"] body::after {
+            opacity: 0.10;
+        }
+
+        html[data-theme="light"] body .auth-card,
+        html[data-theme="light"] body .panel,
+        html[data-theme="light"] body .metric-card,
+        html[data-theme="light"] body .modal,
+        html[data-theme="light"] body .toast {
+            background: linear-gradient(145deg, rgba(255, 253, 247, 0.94), rgba(244, 236, 221, 0.86));
+            border-color: rgba(33, 93, 72, 0.18);
+        }
+
+        html[data-theme="light"] body .auth-visual,
+        html[data-theme="light"] body .metric-card.primary {
+            background:
+                radial-gradient(circle at 28% 18%, rgba(0, 141, 104, 0.13), transparent 35%),
+                linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(227, 215, 190, 0.42));
+        }
+
+        html[data-theme="light"] body .auth-form-panel {
+            background: rgba(255, 255, 255, 0.28);
+        }
+
+        html[data-theme="light"] body .brand-mark,
+        html[data-theme="light"] body .btn {
+            color: #f9f3e7;
+            background: linear-gradient(135deg, #1f6d52, #8a6f18);
+            box-shadow: 0 12px 28px rgba(31, 109, 82, 0.16);
+        }
+
+        html[data-theme="light"] body .btn-outline {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.52);
+            border-color: rgba(33, 93, 72, 0.22);
+            box-shadow: none;
+        }
+
+        html[data-theme="light"] body .btn-danger {
+            color: #8d1730;
+            background: rgba(197, 48, 76, 0.08);
+            border-color: rgba(197, 48, 76, 0.25);
+        }
+
+        html[data-theme="light"] body .text-input,
+        html[data-theme="light"] body .form-control,
+        html[data-theme="light"] body .table-wrapper,
+        html[data-theme="light"] body .side-item,
+        html[data-theme="light"] body .token-preview,
+        html[data-theme="light"] body .status-pill {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.56);
+            border-color: rgba(33, 93, 72, 0.14);
+        }
+
+        html[data-theme="light"] body th {
+            color: #6a7d72;
+            background: rgba(42, 91, 72, 0.055);
+        }
+
+        html[data-theme="light"] body td {
+            color: #243a31;
+        }
+
+        html[data-theme="light"] body tbody tr:hover {
+            background: rgba(0, 141, 104, 0.055);
+        }
+
+        html[data-theme="light"] body .status-pill.available {
+            color: #07533d;
+            background: rgba(0, 143, 98, 0.10);
+            border-color: rgba(0, 143, 98, 0.30);
+        }
+
+        html[data-theme="light"] body .status-pill.expired,
+        html[data-theme="light"] body .status-pill.error {
+            color: #8d1730;
+            background: rgba(197, 48, 76, 0.08);
+            border-color: rgba(197, 48, 76, 0.24);
+        }
+
+        html[data-theme="light"] body .badge,
+        html[data-theme="light"] body .chip {
+            color: #426256;
+            background: rgba(255, 255, 255, 0.52);
+            border-color: rgba(33, 93, 72, 0.16);
+        }
+
+        html[data-theme="light"] body .countdown-text,
+        html[data-theme="light"] body .token-preview,
+        html[data-theme="light"] body .metric-note,
+        html[data-theme="light"] body .panel-copy,
+        html[data-theme="light"] body .side-item span,
+        html[data-theme="light"] body .form-hint,
+        html[data-theme="light"] body .user-name {
+            color: #75877e;
+        }
+
+        html[data-theme="light"] body .status-indicator {
+            background: radial-gradient(circle, var(--ok) 0 28%, rgba(0, 143, 98, 0.22) 30% 54%, transparent 55%);
+            border-color: rgba(0, 143, 98, 0.42);
+            box-shadow: 0 0 28px rgba(0, 143, 98, 0.18);
+        }
+
+        html[data-theme="light"] body .status-indicator.offline {
+            background: radial-gradient(circle, var(--danger) 0 28%, rgba(197, 48, 76, 0.18) 30% 54%, transparent 55%);
+            border-color: rgba(197, 48, 76, 0.38);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
             }
+        }
 
-            .header {
-                align-items: flex-start;
+        @media (max-width: 980px) {
+            .topbar,
+            .page-title {
                 flex-direction: column;
             }
 
-            .header-meta {
+            .top-actions,
+            .badge-row {
                 justify-content: flex-start;
+                min-width: 0;
             }
 
-            .glass-card,
+            .metric-grid,
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .auth-card {
+                grid-template-columns: 1fr;
+            }
+
+            .auth-visual {
+                min-height: 320px;
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+            }
+        }
+
+        @media (max-width: 640px) {
+            .shell {
+                width: min(100% - 22px, 1180px);
+                padding-top: 18px;
+            }
+
+            .auth-page {
+                padding: 14px;
+            }
+
+            .auth-visual,
+            .auth-form-panel,
+            .metric-card,
+            .panel-header,
+            .side-card,
             .modal {
                 padding: 18px;
             }
 
-            th, td {
-                padding: 12px;
+            .metric-card {
+                min-height: 132px;
+            }
+
+            .top-actions .btn,
+            .top-actions .btn-outline {
+                flex: 1 1 calc(50% - 8px);
+            }
+
+            .table-wrapper {
+                margin: 12px;
             }
         }
-
     </style>
 </head>
 <body>
-    <div id="authShell" class="auth-shell hidden">
-        <div class="glass-card">
-            <h1 class="login-title">Mimo2 Center</h1>
-            <p class="login-copy">这个面板现在需要登录后才能查看和管理节点账号。</p>
-            <div class="auth-form">
-                <div>
-                    <label class="form-label" for="loginUsername">用户名</label>
-                    <input id="loginUsername" class="text-input" autocomplete="username" />
+    <div id="authShell" class="auth-page hidden">
+        <section class="auth-card" aria-label="登录 mimi3 控制面板">
+            <div class="auth-visual">
+                <div class="brand-mark">m3</div>
+                <h1>Relay<br>Deck</h1>
+                <p>面向 MIMO 隧道节点的低噪声控制甲板：监控连接、维护账号、保护凭证，并让每一次重建都有迹可循。</p>
+                <div class="signal-stack" aria-hidden="true">
+                    <div class="signal-line"><span>WS tunnel</span></div>
+                    <div class="signal-line"><span>Account cycle</span></div>
+                    <div class="signal-line"><span>OpenAI shim</span></div>
                 </div>
-                <div>
-                    <label class="form-label" for="loginPassword">密码</label>
-                    <input id="loginPassword" class="text-input" type="password" autocomplete="current-password" />
-                </div>
-                <button class="btn" onclick="submitLogin()">登录</button>
             </div>
-        </div>
+            <div class="auth-form-panel">
+                <span class="eyebrow">Authorized access</span>
+                <h2 class="login-title">进入控制面板</h2>
+                <p class="login-copy">需要 WebUI 登录后才能查看节点、导入账号和触发重建。</p>
+                <div class="form-stack">
+                    <div>
+                        <label class="field-label" for="loginUsername">用户名</label>
+                        <input id="loginUsername" class="text-input" autocomplete="username" />
+                    </div>
+                    <div>
+                        <label class="field-label" for="loginPassword">密码</label>
+                        <input id="loginPassword" class="text-input" type="password" autocomplete="current-password" />
+                    </div>
+                    <button class="btn" onclick="submitLogin()">启动会话</button>
+                    <button id="authThemeBtn" class="btn btn-outline" onclick="toggleTheme()" type="button">浅色主题</button>
+                </div>
+            </div>
+        </section>
     </div>
 
-    <div id="appShell" class="container hidden">
-        <div class="header">
-            <h1>Mimo2 Center</h1>
-            <div class="header-meta">
-                <span id="webAuthBadge" class="badge">WebUI 未鉴权</span>
-                <span id="aiAuthBadge" class="badge warn">AI 端点未鉴权</span>
-                <button id="logoutBtn" class="btn btn-outline hidden" onclick="logout()">退出登录</button>
+    <main id="appShell" class="shell hidden">
+        <header class="topbar">
+            <div class="page-title">
+                <div class="brand-mark">m3</div>
+                <div>
+                    <h1>mimi3<br>Relay Deck</h1>
+                    <p>公网网关、Claw 宿主环境与 OpenAI 兼容端点的运行驾驶舱。</p>
+                </div>
             </div>
-        </div>
+            <div class="top-actions">
+                <div class="badge-row">
+                    <span id="webAuthBadge" class="badge warn">WebUI 未鉴权</span>
+                    <span id="aiAuthBadge" class="badge warn">AI 端点未鉴权</span>
+                    <span id="clockBadge" class="badge">--:--:--</span>
+                </div>
+                <button id="themeBtn" class="btn btn-outline" onclick="toggleTheme()" type="button">浅色主题</button>
+                <button class="btn btn-outline" onclick="refreshAll()">刷新</button>
+                <button class="btn btn-outline" onclick="rebuildCluster()">触发重建</button>
+                <button class="btn" onclick="openModal()">导入凭证</button>
+                <button id="logoutBtn" class="btn btn-outline hidden" onclick="logout()">退出</button>
+            </div>
+        </header>
 
-        <!-- 状态卡片 -->
-        <div class="glass-card">
-            <div>
-                <div class="status-container">
+        <section class="metric-grid" aria-label="网关关键指标">
+            <article class="metric-card primary">
+                <div class="metric-label">Gateway Signal</div>
+                <div class="status-orbit">
                     <div id="statusIndicator" class="status-indicator"></div>
                     <div>
                         <div class="status-text">网关运行中</div>
-                        <div class="status-subtext" id="statusText">正在获取实时数据...</div>
+                        <div class="status-subtext" id="statusText">正在同步实时状态...</div>
                     </div>
                 </div>
-            </div>
-        </div>
+            </article>
+            <article class="metric-card">
+                <div class="metric-label">Active Nodes</div>
+                <div id="metricActiveNodes" class="metric-value">--</div>
+                <div class="metric-note">已接入 WebSocket 节点</div>
+            </article>
+            <article class="metric-card">
+                <div class="metric-label">Pending</div>
+                <div id="metricPending" class="metric-value">--</div>
+                <div class="metric-note">当前排队请求</div>
+            </article>
+            <article class="metric-card">
+                <div class="metric-label">Success</div>
+                <div id="metricSuccess" class="metric-value">--</div>
+                <div id="metricSuccessNote" class="metric-note">累计请求成功率</div>
+            </article>
+        </section>
 
-        <!-- 用户管理卡片 -->
-        <div class="glass-card">
-            <div class="flex-between">
-                <h2 style="margin: 0; font-size: 18px;">Claw 运行账号管理</h2>
-                <button class="btn" onclick="openModal()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    导入凭证
-                </button>
-            </div>
-            
-            <div class="table-wrapper">
-                <table id="usersTable">
-                    <thead>
-                        <tr>
-                            <th>用户 ID (User ID)</th>
-                            <th>备注名</th>
-                            <th>实例状态 / 剩余时长</th>
-                            <th>ServiceToken 简览</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="usersBody">
-                        <tr><td colspan="5" class="empty-state">加载中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+        <section class="content-grid">
+            <article class="panel">
+                <div class="panel-header">
+                    <div>
+                        <h2 class="panel-title">Claw 运行账号</h2>
+                        <p class="panel-copy">状态来自小米 AI Studio 查询；短时网络失败会优先展示缓存，避免误判。</p>
+                    </div>
+                    <button class="btn btn-outline" onclick="fetchUsers()">刷新账号</button>
+                </div>
+                <div class="table-wrapper">
+                    <table id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>用户 ID</th>
+                                <th>备注</th>
+                                <th>实例状态</th>
+                                <th>ServiceToken</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersBody">
+                            <tr><td colspan="5" class="empty-state"><strong>正在加载账号</strong>请稍候...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
 
-    <!-- 导入弹窗 -->
-    <div class="modal-overlay" id="importModal">
+            <aside class="side-stack">
+                <section class="panel side-card">
+                    <div class="metric-label">Node Telemetry</div>
+                    <div class="side-list">
+                        <div class="side-item">
+                            <span>Available</span>
+                            <strong id="metricAvailableNodes">--</strong>
+                        </div>
+                        <div class="side-item">
+                            <span>Total Requests</span>
+                            <strong id="metricTotalRequests">--</strong>
+                        </div>
+                        <div class="side-item">
+                            <span>Background Tasks</span>
+                            <strong id="metricBackgroundTasks">--</strong>
+                        </div>
+                    </div>
+                </section>
+                <section class="panel side-card">
+                    <div class="metric-label">Safe Operations</div>
+                    <div class="side-list">
+                        <div class="side-item">
+                            <span>Import</span>
+                            <strong>粘贴 Cookie 文本后只保存在本地 users/ 目录。</strong>
+                        </div>
+                        <div class="side-item">
+                            <span>Rebuild</span>
+                            <strong>触发所有账号下一轮强制重建，适合节点掉线后恢复。</strong>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <div class="modal-overlay" id="importModal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
         <div class="modal">
-            <h3 class="modal-title">导入 Xiaomi 凭证</h3>
+            <h3 id="importTitle" class="modal-title">导入 Xiaomi 凭证</h3>
             <div class="form-group">
-                <label class="form-label">Cookie / 凭证数据字符串</label>
+                <label class="form-label" for="cookieInput">Cookie / 凭证数据字符串</label>
                 <textarea id="cookieInput" class="form-control" placeholder='例如: serviceToken="vjQ..."; userId=686621...; xiaomichatbot_ph="6vv..."'></textarea>
-                <div class="form-hint">支持自动解析多格式文本，需至少包含 <code>userId</code>, <code>serviceToken</code> 及 <code>xiaomichatbot_ph</code>。系统会自动提取值。</div>
+                <div class="form-hint">支持自动解析多格式文本，需至少包含 <code>userId</code>、<code>serviceToken</code> 和 <code>xiaomichatbot_ph</code>。</div>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-outline" onclick="closeModal()">取消</button>
@@ -444,10 +1208,45 @@
 
     <script>
         let statusInterval;
+        let usersInterval;
+        let toastTimer;
         let webAuthEnabled = false;
         let webAuthReady = false;
         let preferredUsername = 'admin';
         let statusFailureCount = 0;
+        let currentTheme = 'light';
+
+        function preferredTheme() {
+            try {
+                const stored = localStorage.getItem('mimi3-theme');
+                if (stored === 'light' || stored === 'dark') return stored;
+            } catch (e) {
+                console.warn('无法读取主题偏好，使用浅色主题', e);
+            }
+            return 'light';
+        }
+
+        function applyTheme(theme) {
+            currentTheme = theme === 'dark' ? 'dark' : 'light';
+            document.documentElement.dataset.theme = currentTheme;
+            try {
+                localStorage.setItem('mimi3-theme', currentTheme);
+            } catch (e) {
+                console.warn('无法保存主题偏好', e);
+            }
+            const label = currentTheme === 'light' ? '深色主题' : '浅色主题';
+            const title = currentTheme === 'light' ? '切换到深色 Relay Deck' : '切换到浅色 Paper Deck';
+            [document.getElementById('themeBtn'), document.getElementById('authThemeBtn')].forEach(btn => {
+                if (!btn) return;
+                btn.textContent = label;
+                btn.title = title;
+                btn.setAttribute('aria-label', title);
+            });
+        }
+
+        function toggleTheme() {
+            applyTheme(currentTheme === 'light' ? 'dark' : 'light');
+        }
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>'"]/g, ch => ({
@@ -459,11 +1258,22 @@
             }[ch]));
         }
 
+        function formatNumber(value) {
+            const num = Number(value || 0);
+            return Number.isFinite(num) ? num.toLocaleString('zh-CN') : '--';
+        }
+
+        function formatPercent(value) {
+            const num = Number(value || 0);
+            return Number.isFinite(num) ? `${num.toFixed(1)}%` : '--';
+        }
+
         function showToast(msg, type='success') {
             const el = document.getElementById('toast');
+            clearTimeout(toastTimer);
             el.textContent = msg;
             el.className = `toast show ${type}`;
-            setTimeout(() => { el.className = `toast ${type}`; }, 3000);
+            toastTimer = setTimeout(() => { el.className = `toast ${type}`; }, 3200);
         }
 
         function setShellVisibility(showApp) {
@@ -471,15 +1281,18 @@
             document.getElementById('authShell').classList.toggle('hidden', showApp);
         }
 
+        function setBadge(el, text, kind) {
+            el.textContent = text;
+            el.className = `badge ${kind || ''}`.trim();
+        }
+
         function applyAuthBadges(session) {
             const webBadge = document.getElementById('webAuthBadge');
             const aiBadge = document.getElementById('aiAuthBadge');
             const logoutBtn = document.getElementById('logoutBtn');
 
-            webBadge.textContent = session.enabled ? `WebUI 已鉴权 · ${session.username}` : 'WebUI 未鉴权';
-            webBadge.className = `badge${session.enabled ? '' : ' warn'}`;
-            aiBadge.textContent = session.ai_auth_enabled ? 'AI 端点已鉴权' : 'AI 端点未鉴权';
-            aiBadge.className = `badge${session.ai_auth_enabled ? '' : ' warn'}`;
+            setBadge(webBadge, session.enabled ? `WebUI · ${session.username}` : 'WebUI 未鉴权', session.enabled ? '' : 'warn');
+            setBadge(aiBadge, session.ai_auth_enabled ? 'AI 端点已鉴权' : 'AI 端点未鉴权', session.ai_auth_enabled ? '' : 'warn');
             logoutBtn.classList.toggle('hidden', !session.enabled);
         }
 
@@ -503,7 +1316,7 @@
                 const wasAuthenticated = webAuthReady;
                 webAuthReady = false;
                 setShellVisibility(false);
-                // 仅在会话过期（之前已登录）时清空密码，未登录状态下不干扰用户输入
+                stopPolling();
                 if (wasAuthenticated) {
                     document.getElementById('loginPassword').value = '';
                 }
@@ -514,45 +1327,84 @@
         }
 
         function startStatusPolling() {
-            if (statusInterval) {
-                clearInterval(statusInterval);
-            }
+            stopPolling();
             statusInterval = setInterval(() => {
                 if (webAuthReady || !webAuthEnabled) {
                     fetchStatus();
                 }
             }, 3000);
+            usersInterval = setInterval(() => {
+                if (webAuthReady || !webAuthEnabled) {
+                    fetchUsers();
+                }
+            }, 30000);
+        }
+
+        function stopPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            if (usersInterval) clearInterval(usersInterval);
+            statusInterval = null;
+            usersInterval = null;
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clockBadge').textContent = now.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        function setMetric(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
         }
 
         async function fetchStatus() {
-            // 认证开启但未登录时，跳过状态请求（避免 401 清空密码输入框）
             if (webAuthEnabled && !webAuthReady) return;
             try {
-                const res = await apiFetch('/api/system/status');
+                const res = await apiFetch('/api/stats');
                 const data = await res.json();
                 const indicator = document.getElementById('statusIndicator');
                 const text = document.getElementById('statusText');
-                
+                const active = Number(data.active_clients || 0);
+                const available = Number(data.available_clients ?? active);
+                const pending = Number(data.pending_requests || 0);
+                const totalRequests = Number(data.requests?.total || 0);
+                const successRate = Number(data.requests?.success_rate || 0);
+
                 statusFailureCount = 0;
-                if (data.active_clients > 0) {
+                setMetric('metricActiveNodes', formatNumber(active));
+                setMetric('metricAvailableNodes', `${formatNumber(available)} / ${formatNumber(active)}`);
+                setMetric('metricPending', formatNumber(pending));
+                setMetric('metricSuccess', totalRequests ? formatPercent(successRate) : '--');
+                setMetric('metricTotalRequests', formatNumber(totalRequests));
+                setMetric('metricBackgroundTasks', formatNumber(data.background_tasks || 0));
+                setMetric('metricSuccessNote', totalRequests ? `${formatNumber(data.requests.succeeded)} 成功 / ${formatNumber(totalRequests)} 总请求` : '暂无请求样本');
+
+                if (active > 0 && available > 0) {
                     indicator.className = 'status-indicator';
-                    text.textContent = `内网通信节点保持连接: ${data.active_clients} 个`;
+                    text.textContent = `内网通信节点在线：${available}/${active} 可用，当前 pending ${pending}。`;
+                } else if (active > 0) {
+                    indicator.className = 'status-indicator offline';
+                    text.textContent = `节点已接入但全部处于冷却或不可用状态，当前 pending ${pending}。`;
                 } else {
                     indicator.className = 'status-indicator offline';
-                    text.textContent = `危险！没有任何一个内网节点在线，所有 API 请求将被退回`;
+                    text.textContent = '没有任何内网节点在线，所有 API 请求将被退回。';
                 }
             } catch(e) {
-                if (e.message === 'UNAUTHORIZED') {
-                    return;
-                }
+                if (e.message === 'UNAUTHORIZED') return;
                 statusFailureCount += 1;
                 if (statusFailureCount < 3) {
                     console.warn('状态轮询临时失败，保留上一次状态', e);
                     return;
                 }
                 document.getElementById('statusIndicator').className = 'status-indicator offline';
-                document.getElementById('statusText').textContent = '后端连接连续失败';
+                document.getElementById('statusText').textContent = '后端连接连续失败，请检查服务状态。';
             }
+        }
+
+        function statusClass(status) {
+            if (status === 'AVAILABLE') return 'available';
+            if (status === 'EXPIRED(401)' || status === 'ERROR') return 'expired';
+            return 'warn';
         }
 
         async function fetchUsers() {
@@ -560,42 +1412,43 @@
                 const res = await apiFetch('/api/users/list');
                 const data = await res.json();
                 const tbody = document.getElementById('usersBody');
-                
-                if (data.users && data.users.length > 0) {
-                    tbody.innerHTML = data.users.map(u => {
+                const users = data.users || [];
+
+                if (users.length > 0) {
+                    tbody.innerHTML = users.map(u => {
                         const userId = escapeHtml(u.userId);
+                        const encodedUserId = encodeURIComponent(u.userId || '');
                         const name = escapeHtml(u.name || '(未命名)');
                         const status = escapeHtml(u.claw_status || '未知');
                         const token = escapeHtml(u.tokenPreview || (u.hasServiceToken ? '已保存' : '无效'));
-                        const statusHint = u.status_source === 'cache' ? '（缓存）' : '';
-                        const statusColor = u.claw_status === 'AVAILABLE' ? '#10B981' : (u.claw_status === 'EXPIRED(401)' ? '#EF4444' : '#F59E0B');
+                        const statusHint = u.status_source === 'cache' ? ' · cache' : '';
+                        const remain = Number(u.remain_sec) || 0;
+                        const statusCls = statusClass(u.claw_status);
                         return `
                             <tr>
-                                <td><strong style="color:var(--primary)">${userId}</strong></td>
-                                <td>${name}</td>
+                                <td><span class="mono">${userId}</span></td>
+                                <td><span class="user-name">${name}</span></td>
                                 <td>
-                                    <div><strong style="color: ${statusColor}">${status}${statusHint}</strong></div>
-                                    <div class="countdown-text" data-remain="${Number(u.remain_sec) || 0}" style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                                        ${u.remain_sec > 0 ? '剩余: ' + Math.floor(u.remain_sec / 60) + ' 分 ' + (u.remain_sec % 60) + ' 秒' : '已过期/无环境'}
+                                    <span class="status-pill ${statusCls}">${status}${statusHint}</span>
+                                    <div class="countdown-text" data-remain="${remain}">
+                                        ${remain > 0 ? '剩余: ' + Math.floor(remain / 60) + ' 分 ' + (remain % 60) + ' 秒' : '已过期/无环境'}
                                     </div>
                                 </td>
-                                <td>
-                                    <span style="display:inline-block; max-width: 120px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color: var(--text-muted);">
-                                        ${token}
-                                    </span>
-                                </td>
-                                <td>
-                                    <button class="btn btn-danger" onclick="deleteUser('${userId}')">删除</button>
-                                </td>
+                                <td><span class="token-preview">${token}</span></td>
+                                <td><button class="btn btn-danger" data-user-id="${encodedUserId}">删除</button></td>
                             </tr>
                         `;
                     }).join('');
+                    tbody.querySelectorAll('button[data-user-id]').forEach(btn => {
+                        btn.addEventListener('click', () => deleteUser(decodeURIComponent(btn.dataset.userId || '')));
+                    });
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">当前未加载任何凭证</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><strong>还没有凭证</strong>点击右上角“导入凭证”添加第一个账号。</td></tr>';
                 }
             } catch(e) {
                 if (e.message !== 'UNAUTHORIZED') {
-                    console.error("加载用户列表失败", e);
+                    console.error('加载用户列表失败', e);
+                    showToast('账号列表加载失败', 'error');
                 }
             }
         }
@@ -603,7 +1456,7 @@
         async function deleteUser(uid) {
             if(!confirm(`确定要移除账号 ${uid} 吗？\n删除后下一次轮换将不再拉起该账号的请求。`)) return;
             try {
-                const res = await apiFetch(`/api/users/delete/${uid}`, {method: 'DELETE'});
+                const res = await apiFetch(`/api/users/delete/${encodeURIComponent(uid)}`, {method: 'DELETE'});
                 if(res.ok) {
                     showToast('删除成功');
                     fetchUsers();
@@ -611,13 +1464,29 @@
                     showToast('删除失败: '+ (await res.text()), 'error');
                 }
             } catch(e) {
-                showToast('网络请求异常', 'error');
+                if (e.message !== 'UNAUTHORIZED') showToast('网络请求异常', 'error');
+            }
+        }
+
+        async function rebuildCluster() {
+            if (!confirm('确认触发所有账号重建？\n这会让 manager 在下一轮跳过复用并重新创建实例。')) return;
+            try {
+                const res = await apiFetch('/api/rebuild', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    showToast(data.message || '重建信号已发送');
+                } else {
+                    showToast(data.detail || data.error || '触发重建失败', 'error');
+                }
+            } catch (e) {
+                if (e.message !== 'UNAUTHORIZED') showToast('触发重建异常', 'error');
             }
         }
 
         function openModal() {
             document.getElementById('cookieInput').value = '';
             document.getElementById('importModal').classList.add('active');
+            setTimeout(() => document.getElementById('cookieInput').focus(), 80);
         }
 
         function closeModal() {
@@ -662,6 +1531,7 @@
                 });
             } finally {
                 webAuthReady = false;
+                stopPolling();
                 setShellVisibility(false);
                 document.getElementById('loginPassword').value = '';
             }
@@ -670,7 +1540,8 @@
         async function submitImport() {
             const val = document.getElementById('cookieInput').value;
             if(!val.trim()) {
-                showToast('输入不能为空', 'error'); return;
+                showToast('输入不能为空', 'error');
+                return;
             }
 
             try {
@@ -679,7 +1550,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ raw_text: val })
                 });
-                
+
                 const data = await res.json();
                 if(res.ok) {
                     showToast(`成功提取并存入 userId: ${data.userId}`);
@@ -695,17 +1566,25 @@
             }
         }
 
+        async function refreshAll() {
+            await Promise.allSettled([fetchStatus(), fetchUsers()]);
+            showToast('数据已刷新');
+        }
+
         async function initializeDashboard() {
-            await Promise.all([fetchStatus(), fetchUsers()]);
+            await Promise.allSettled([fetchStatus(), fetchUsers()]);
             startStatusPolling();
         }
 
         async function bootstrap() {
+            applyTheme(preferredTheme());
+            updateClock();
+            setInterval(updateClock, 1000);
             try {
                 const session = await fetchSession();
                 if (session.enabled && !session.authenticated) {
                     setShellVisibility(false);
-                    return;   // 认证未通过，不启动轮询，不触发 fetchStatus
+                    return;
                 }
                 webAuthReady = true;
                 setShellVisibility(true);
@@ -715,8 +1594,7 @@
                 showToast('初始化失败，请刷新重试', 'error');
             }
         }
-        
-        // 本地纯前端倒计时（不消耗任何网络请求）
+
         setInterval(() => {
             document.querySelectorAll('.countdown-text').forEach(el => {
                 let remain = parseInt(el.getAttribute('data-remain'));
@@ -730,8 +1608,15 @@
             });
         }, 1000);
 
-        window.addEventListener('DOMContentLoaded', bootstrap);
+        document.getElementById('importModal').addEventListener('click', (event) => {
+            if (event.target.id === 'importModal') closeModal();
+        });
 
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') closeModal();
+        });
+
+        window.addEventListener('DOMContentLoaded', bootstrap);
     </script>
 </body>
 </html>
