@@ -1366,6 +1366,8 @@
                 const text = document.getElementById('statusText');
                 const active = Number(data.active_clients || 0);
                 const available = Number(data.available_clients ?? active);
+                const managed = Number(data.managed_clients || 0);
+                const legacy = Number(data.legacy_clients || 0);
                 const pending = Number(data.pending_requests || 0);
                 const totalRequests = Number(data.requests?.total || 0);
                 const successRate = Number(data.requests?.success_rate || 0);
@@ -1381,10 +1383,10 @@
 
                 if (active > 0 && available > 0) {
                     indicator.className = 'status-indicator';
-                    text.textContent = `内网通信节点在线：${available}/${active} 可用，当前 pending ${pending}。`;
+                    text.textContent = `内网通信节点在线：${available}/${active} 可用（账号节点 ${managed}，遗留 ${legacy}），当前 pending ${pending}。`;
                 } else if (active > 0) {
                     indicator.className = 'status-indicator offline';
-                    text.textContent = `节点已接入但全部处于冷却或不可用状态，当前 pending ${pending}。`;
+                    text.textContent = `节点已接入但全部处于冷却、遗留未路由或不可用状态（账号节点 ${managed}，遗留 ${legacy}），当前 pending ${pending}。`;
                 } else {
                     indicator.className = 'status-indicator offline';
                     text.textContent = '没有任何内网节点在线，所有 API 请求将被退回。';

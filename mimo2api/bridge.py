@@ -78,6 +78,10 @@ async def main():
                         task = asyncio.create_task(handle_request(ws, req, client, send_lock, semaphore))
                         tasks.add(task)
                         task.add_done_callback(tasks.discard)
+            except websockets.exceptions.ConnectionClosed as exc:
+                if getattr(exc, "code", None) == 1008:
+                    return
+                await asyncio.sleep(3)
             except Exception:
                 await asyncio.sleep(3)
             finally:

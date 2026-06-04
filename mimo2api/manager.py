@@ -102,22 +102,39 @@ def load_all_users() -> dict:
     return users
 
 
+def _append_ws_query_params(ws_url: str, params: dict[str, str], *, overwrite: bool = True) -> str:
+    parts = urlsplit(ws_url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    existing_keys = {key for key, _ in query_items}
+    if overwrite:
+        query_items = [(key, value) for key, value in query_items if key not in params]
+    for key, value in params.items():
+        if value and (overwrite or key not in existing_keys):
+            query_items.append((key, value))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+
+
 def _append_node_token_to_ws_url(ws_url: str) -> str:
     node_token = os.environ.get("MIMO_NODE_TOKEN", "").strip()
     if not node_token:
         return ws_url
-
-    parts = urlsplit(ws_url)
-    query_items = parse_qsl(parts.query, keep_blank_values=True)
-    query_keys = {key for key, _ in query_items}
-    if "token" not in query_keys and "node_token" not in query_keys:
-        query_items.append(("token", node_token))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+    query_keys = {key for key, _ in parse_qsl(urlsplit(ws_url).query, keep_blank_values=True)}
+    if "token" in query_keys or "node_token" in query_keys:
+        return ws_url
+    return _append_ws_query_params(ws_url, {"token": node_token}, overwrite=False)
 
 
-async def get_bridge_code() -> str:
+def _bridge_node_id(uid: str) -> str:
+    safe_uid = str(uid or "unknown").strip() or "unknown"
+    return f"account:{safe_uid}"
+
+
+def _new_bridge_generation() -> str:
+    return str(time.time_ns())
+
+
+async def get_bridge_code(node_id: str | None = None, node_generation: str | None = None) -> str:
     """读取本地 bridge 代码文本"""
-    import re
     bridge_path = os.path.join(os.path.dirname(__file__), "bridge.py")
     def _read():
         with open(bridge_path, "r", encoding="utf-8") as f:
@@ -129,6 +146,13 @@ async def get_bridge_code() -> str:
     if not ws_url:
         raise ValueError("MIMO2API_WS_URL环境变量未配置")
     ws_url = _append_node_token_to_ws_url(ws_url)
+    identity_params = {}
+    if node_id:
+        identity_params["node_id"] = node_id
+    if node_generation:
+        identity_params["node_generation"] = node_generation
+    if identity_params:
+        ws_url = _append_ws_query_params(ws_url, identity_params)
     # 动态把桥接脚本里面原来写死的 WS_URL 给替换掉，并返回修改后的代码块。
     code = code.replace("__WS_URL__", ws_url)
     return code
@@ -455,6 +479,7 @@ class AccountManager:
             "xiaomichatbot_ph": self.ph
         }
         self.name = user_info.get("name", self.uid)
+        self.node_id = _bridge_node_id(self.uid)
         self.logger = logging.getLogger(f"Acc-{self.name}-{self.uid}")
         self.stagger_offset = stagger_offset
         self.is_first_round = True
@@ -533,10 +558,10 @@ class AccountManager:
                 if st == "AVAILABLE" and remain_sec > 180 and not force_rebuild:
                     self.logger.info(f"发现可用宿主环境！尝试直接免重启挂载接入...")
                     if await self.connect_with_retry(client, max_retries=3, delay=5, create=False):
-                        bridge_code = await get_bridge_code()
+                        bridge_code = await get_bridge_code(self.node_id, _new_bridge_generation())
                         inject_prompt = (
                             "好，请检查当前环境是否有 websockets 和 httpx 依赖（如果没有请马上安装）。\n"
-                            "然后，请先将当前主机上正在运行（如果有的话）的所有资源桥接脚本进程杀掉（例如寻找并 kill 掉包含 ws:// 连结的后台 python 进程），"
+                            f"然后，请先将当前主机上正在运行（如果有的话）的所有资源桥接脚本进程杀掉（尤其是包含 node_id={self.node_id} 或 /ws 的后台 python/nohup 进程），"
                             "随后，用 nohup 在后台静默运行以下代码（不要阻塞我们的对话）：\n"
                             "```python\n"
                             f"{bridge_code}\n"
@@ -600,10 +625,11 @@ class AccountManager:
 
                 # 5. 注入核心桥接通信脚本
                 self.logger.info("正解析并注入 mimo2api bridge.py ...")
-                bridge_code = await get_bridge_code()
+                bridge_code = await get_bridge_code(self.node_id, _new_bridge_generation())
                 inject_prompt = (
                     "好，帮我安装websockets和httpx。\n"
-                    "然后请用 nohup 后台静默运行以下 Python 资源桥接代码（请务必在后台运行，不要阻塞我们的对话！）：\n"
+                    f"然后请先杀掉当前主机上旧的资源桥接脚本进程（尤其是包含 node_id={self.node_id} 或 /ws 的后台 python/nohup 进程），避免重复 WebSocket 节点残留。\n"
+                    "最后请用 nohup 后台静默运行以下 Python 资源桥接代码（请务必在后台运行，不要阻塞我们的对话！）：\n"
                     "```python\n"
                     f"{bridge_code}\n"
                     "```"

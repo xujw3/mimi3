@@ -107,10 +107,7 @@ async def close_active_clients() -> None:
 
     logger.info(f"🛑 正在关闭 {len(clients)} 个内网节点连接...")
     for client in clients:
-        try:
-            await client.close()
-        except Exception as exc:
-            logger.debug(f"关闭内网节点连接失败: {exc}")
+        await close_gateway_client(client, "网关正在关闭", code=1001)
 
 
 async def cancel_and_wait_tasks(tasks: list[asyncio.Task | None], *, label: str) -> None:
@@ -249,6 +246,10 @@ STREAM_KEEPALIVE_INTERVAL = 25  # 秒，需小于 Cloudflare 超时 (~100s)
 QUEUE_DRAIN_TIMEOUT = 5
 DEFAULT_GATEWAY_ERROR = "Gateway Error: 所有节点请求失败"
 NODE_401_COOLDOWN_SECONDS = int(os.getenv("MIMO_NODE_401_COOLDOWN_SECONDS", "900"))
+NODE_RETRY_COOLDOWN_SECONDS = int(os.getenv("MIMO_NODE_RETRY_COOLDOWN_SECONDS", "60"))
+NODE_INTERNAL_ERROR_COOLDOWN_SECONDS = int(os.getenv("MIMO_NODE_INTERNAL_ERROR_COOLDOWN_SECONDS", "60"))
+MAX_LEGACY_NODES = max(0, int(os.getenv("MIMO_MAX_LEGACY_NODES", "1")))
+MAX_LEGACY_NODES_WHEN_MANAGED = max(0, int(os.getenv("MIMO_MAX_LEGACY_NODES_WHEN_MANAGED", "0")))
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROCESS_LOCK_PATH = os.getenv("MIMO_PROCESS_LOCK_PATH", os.path.join(ROOT_DIR, "mimo2api.lock"))
 
@@ -449,22 +450,172 @@ def extract_node_token(ws: WebSocket) -> str | None:
     return ws.query_params.get("token") or ws.query_params.get("node_token")
 
 
+def parse_node_generation(raw_value: str | None) -> int:
+    try:
+        return max(0, int(str(raw_value or "0").strip() or "0"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_node_identity(ws: WebSocket, client_addr: str) -> tuple[str, int, bool]:
+    node_id = str(ws.query_params.get("node_id") or "").strip()
+    if node_id:
+        return node_id[:200], parse_node_generation(ws.query_params.get("node_generation")), True
+    return f"legacy:{client_addr}#{id(ws)}", 0, False
+
+
+def is_managed_client(ws: WebSocket) -> bool:
+    return bool(state.ws_node_managed.get(id(ws), False))
+
+
+def managed_clients() -> list[WebSocket]:
+    return [client for client in state.active_clients if is_managed_client(client)]
+
+
+def legacy_clients() -> list[WebSocket]:
+    return [client for client in state.active_clients if not is_managed_client(client)]
+
+
+def current_legacy_limit() -> int:
+    return MAX_LEGACY_NODES_WHEN_MANAGED if managed_clients() else MAX_LEGACY_NODES
+
+
+def routable_clients() -> list[WebSocket]:
+    managed = managed_clients()
+    if managed:
+        return managed
+    return legacy_clients()
+
+
+def unregister_client(ws: WebSocket, *, error_body: str = "节点断开连接") -> set[str]:
+    ws_id = id(ws)
+    if ws in state.active_clients:
+        state.active_clients.remove(ws)
+
+    state.client_cooldowns.pop(ws_id, None)
+    state.ws_node_labels.pop(ws_id, None)
+    node_id = state.ws_node_ids.pop(ws_id, None)
+    state.ws_node_generations.pop(ws_id, None)
+    state.ws_node_managed.pop(ws_id, None)
+    if node_id and state.node_id_to_ws.get(node_id) is ws:
+        state.node_id_to_ws.pop(node_id, None)
+
+    orphan_ids = state.ws_to_req_ids.pop(ws_id, set())
+    for orphan_id in orphan_ids:
+        q = state.pending_queues.pop(orphan_id, None)
+        state.req_id_to_ws_id.pop(orphan_id, None)
+        state.req_id_timestamps.pop(orphan_id, None)
+        if q is not None:
+            try:
+                q.put_nowait({"type": "error", "body": error_body})
+            except asyncio.QueueFull:
+                pass
+
+    if state.current_client_index >= len(routable_clients()):
+        state.current_client_index = 0
+    return orphan_ids
+
+
+async def close_gateway_client(ws: WebSocket, reason: str, *, code: int = 1000) -> None:
+    label = state.ws_node_labels.get(id(ws)) or (ws.client.host if ws.client else "Unknown")
+    unregister_client(ws, error_body=reason)
+    try:
+        await ws.close(code=code)
+    except Exception as exc:
+        logger.debug(f"关闭节点 {label} 失败: {exc}")
+
+
+async def reject_node_connection(ws: WebSocket, reason: str, *, code: int = 1008) -> None:
+    try:
+        await ws.accept()
+    except Exception as exc:
+        logger.debug(f"接纳待拒绝节点以发送关闭码失败: {exc}")
+    try:
+        await ws.close(code=code)
+    except Exception as exc:
+        logger.debug(f"拒绝节点连接失败 ({reason}): {exc}")
+
+
+async def close_excess_legacy_clients() -> None:
+    limit = current_legacy_limit()
+    legacy = legacy_clients()
+    if len(legacy) <= limit:
+        return
+    for client in legacy[limit:]:
+        label = state.ws_node_labels.get(id(client), "legacy")
+        logger.warning(f"🧹 关闭遗留未标识节点 {label}：当前已有可识别账号节点，legacy 上限为 {limit}")
+        await close_gateway_client(client, "遗留未标识节点已被账号节点替换", code=1008)
+
+
+async def ensure_node_admissible(ws: WebSocket, node_id: str, node_generation: int, managed: bool) -> bool:
+    if not managed:
+        limit = current_legacy_limit()
+        if len(legacy_clients()) >= limit:
+            logger.warning(f"⛔ 拒绝遗留未标识节点 {node_id}：legacy 上限为 {limit}")
+            await reject_node_connection(ws, "节点接入策略拒绝", code=1008)
+            return False
+        return True
+
+    latest_generation = state.node_latest_generations.get(node_id)
+    if latest_generation is not None and node_generation < latest_generation:
+        logger.warning(
+            f"⛔ 拒绝旧一代节点 {node_id}: incoming={node_generation}, latest={latest_generation}"
+        )
+        await reject_node_connection(ws, "节点接入策略拒绝", code=1008)
+        return False
+
+    existing = state.node_id_to_ws.get(node_id)
+    if existing is not None and existing in state.active_clients:
+        existing_generation = state.ws_node_generations.get(id(existing), 0)
+        if node_generation < existing_generation:
+            logger.warning(
+                f"⛔ 拒绝重复旧节点 {node_id}: incoming={node_generation}, active={existing_generation}"
+            )
+            await reject_node_connection(ws, "节点接入策略拒绝", code=1008)
+            return False
+        if node_generation == existing_generation:
+            logger.warning(
+                f"⏸️ 拒绝同代重复节点 {node_id}: generation={node_generation}，保留已在线连接"
+            )
+            await reject_node_connection(ws, "同代节点已在线", code=1013)
+            return False
+        logger.warning(
+            f"🔁 节点 {node_id} 新一代接入，关闭旧连接后接纳新连接: old={existing_generation}, new={node_generation}"
+        )
+        await close_gateway_client(existing, "节点已被新一代连接替换", code=1008)
+
+    state.node_latest_generations[node_id] = max(node_generation, latest_generation or 0)
+    return True
+
+
 @app.websocket("/ws")
 async def ws_tunnel(ws: WebSocket):
+    client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
     if not verify_node_token(extract_node_token(ws)):
-        client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
         logger.warning(f"⛔ 拒绝未授权内网节点连接: {client_addr}")
         await ws.close(code=1008)
         return
 
+    node_id, node_generation, managed = get_node_identity(ws, client_addr)
+    if not await ensure_node_admissible(ws, node_id, node_generation, managed):
+        return
+
     await ws.accept()
-    client_addr = f"{ws.client.host}:{ws.client.port}" if ws.client else "Unknown"
-    node_id = ws.query_params.get("node_id") or f"{client_addr}#{id(ws)}"
     state.active_clients.append(ws)
     state.ws_node_labels[id(ws)] = node_id
+    state.ws_node_ids[id(ws)] = node_id
+    state.ws_node_generations[id(ws)] = node_generation
+    state.ws_node_managed[id(ws)] = managed
+    if managed:
+        state.node_id_to_ws[node_id] = ws
     state.client_cooldowns.pop(id(ws), None)
-    logger.info(f"✅ 内网节点已接入: {node_id}。当前在线节点数: {len(state.active_clients)}")
-    
+    logger.info(
+        f"✅ 内网节点已接入: {node_id} (generation={node_generation}, managed={managed})。"
+        f"当前在线节点数: {len(state.active_clients)}"
+    )
+    if managed:
+        await close_excess_legacy_clients()
+
     try:
         while True:
             msg = await ws.receive_text()
@@ -474,40 +625,23 @@ async def ws_tunnel(ws: WebSocket):
                 touch_pending_request(req_id)
                 state.pending_queues[req_id].put_nowait(data)
     except WebSocketDisconnect:
-        logger.warning(f"❌ 内网节点主动断开: {client_addr}")
+        logger.warning(f"❌ 内网节点主动断开: {node_id} ({client_addr})")
     except Exception as e:
-        logger.error(f"❌ 内网节点异常断开: {client_addr}, 错误: {e}")
+        logger.error(f"❌ 内网节点异常断开: {node_id} ({client_addr}), 错误: {e}")
     finally:
-        if ws in state.active_clients:
-            state.active_clients.remove(ws)
-        state.client_cooldowns.pop(id(ws), None)
-        state.ws_node_labels.pop(id(ws), None)
-
-        # 清理该节点的所有孤儿队列
-        orphan_ids = state.ws_to_req_ids.pop(id(ws), set())
-        for orphan_id in orphan_ids:
-            q = state.pending_queues.pop(orphan_id, None)
-            state.req_id_to_ws_id.pop(orphan_id, None)
-            state.req_id_timestamps.pop(orphan_id, None)
-            if q is not None:
-                try:
-                    q.put_nowait({"type": "error", "body": "节点断开连接"})
-                except asyncio.QueueFull:
-                    pass
+        orphan_ids = unregister_client(ws)
         if orphan_ids:
             logger.warning(f"🧹 节点断开，已清理 {len(orphan_ids)} 个孤儿请求队列")
-            
-        if state.current_client_index >= len(state.active_clients):
-            state.current_client_index = 0
         logger.info(f"当前在线节点数: {len(state.active_clients)}")
 
 
 def get_next_client() -> WebSocket | None:
-    if not state.active_clients:
+    clients = routable_clients()
+    if not clients:
         return None
     now = time.time()
     available_clients: list[WebSocket] = []
-    for client in state.active_clients:
+    for client in clients:
         if state.client_cooldowns.get(id(client), 0) <= now:
             available_clients.append(client)
     if not available_clients:
@@ -527,7 +661,7 @@ def get_next_client() -> WebSocket | None:
 
 def get_available_client_count() -> int:
     now = time.time()
-    return sum(1 for c in state.active_clients if state.client_cooldowns.get(id(c), 0) <= now)
+    return sum(1 for c in routable_clients() if state.client_cooldowns.get(id(c), 0) <= now)
 
 
 def touch_pending_request(req_id: str) -> None:
@@ -579,6 +713,14 @@ async def drain_and_close(req_id: str, queue: asyncio.Queue) -> None:
 def should_retry_status(status_code: int) -> bool:
     return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
 
+
+def retry_cooldown_seconds(status_code: int) -> int:
+    if status_code in (401, 403):
+        return NODE_401_COOLDOWN_SECONDS
+    if status_code == 429 or status_code >= 500:
+        return NODE_RETRY_COOLDOWN_SECONDS
+    return 0
+
 def build_ws_payload(req_id: str, method: str, path: str, body: str) -> str:
     return json.dumps({"req_id": req_id, "method": method, "path": path, "body": body})
 
@@ -607,18 +749,18 @@ async def dispatch_to_node(*, method: str, path: str, body: str, log_label: str,
         logger.debug(f"👉 {log_label} [{req_id[:8]}] ({method} {path}) -> 节点: {node_label(target_ws)} (尝试 {attempt_number})")
     except RuntimeError:
         record_attempt_finished(target_ws=target_ws, status_code=0, first_byte_latency_ms=(time.monotonic() - attempt_started_at) * 1000, success=False)
-        logger.warning(f"⚠️ {log_label} 转发失败，节点状态异常，尝试切换...")
+        logger.warning(f"⚠️ {log_label} 转发失败，节点状态异常，关闭该节点并尝试切换...")
         cleanup_pending_request(req_id) # 内部会自动解绑 target_ws
-        if target_ws in state.active_clients:
-            state.active_clients.remove(target_ws)
-        state.client_cooldowns.pop(id(target_ws), None)
+        await close_gateway_client(target_ws, "节点发送失败，已从请求池移除", code=1011)
         return None
 
     try:
         first_msg = await asyncio.wait_for(queue.get(), timeout=NODE_RESPONSE_TIMEOUT)
     except asyncio.TimeoutError:
         record_attempt_finished(target_ws=target_ws, status_code=504, first_byte_latency_ms=(time.monotonic() - attempt_started_at) * 1000, success=False)
+        logger.warning(f"⏱️ {log_label} 节点 {node_label(target_ws)} {NODE_RESPONSE_TIMEOUT}s 未返回首包，关闭该节点并切换...")
         cleanup_pending_request(req_id)
+        await close_gateway_client(target_ws, "节点首包超时，已从请求池移除", code=1011)
         raise
 
     record_attempt_finished(
@@ -638,20 +780,23 @@ async def prepare_forward_attempt(*, method: str, path: str, body: str, log_labe
     first_msg = attempt.first_msg
     if first_msg.get("type") == "error":
         error_text = first_msg.get("body") or "节点返回错误"
-        logger.warning(f"⚠️ {log_label} 节点返回内部错误: {error_text}，尝试切换...")
+        logger.warning(f"⚠️ {log_label} 节点返回内部错误: {error_text}，冷却该节点并尝试切换...")
+        cooldown_client(attempt.target_ws, NODE_INTERNAL_ERROR_COOLDOWN_SECONDS, "节点内部错误")
         retry_state.response_text = f"Gateway Error: {error_text}"
         cleanup_pending_request(attempt.req_id)
         return None
 
-    status_code = first_msg.get("status", 200)
-    if status_code == 401:
-        cooldown_client(attempt.target_ws, NODE_401_COOLDOWN_SECONDS, "401 Unauthorized")
-        retry_state.status_code = 401
-        retry_state.response_text = "Gateway Error: 节点鉴权失败 (401)，已临时跳过该节点"
-
+    status_code = int(first_msg.get("status", 200))
     if should_retry_status(status_code):
+        cooldown_seconds = retry_cooldown_seconds(status_code)
+        if cooldown_seconds > 0:
+            cooldown_client(attempt.target_ws, cooldown_seconds, f"HTTP {status_code}")
         logger.warning(f"⚠️ {log_label} 节点返回状态码 {status_code}，触发自动重试 (当前 attempt={attempt_number})...")
         retry_state.status_code = status_code
+        if status_code in (401, 403):
+            retry_state.response_text = f"Gateway Error: 节点鉴权失败 ({status_code})，已临时跳过该节点"
+        else:
+            retry_state.response_text = f"Gateway Error: 节点返回状态码 {status_code}，已临时跳过该节点"
         _track_task(asyncio.create_task(drain_and_close(attempt.req_id, attempt.queue)))
         return None
 

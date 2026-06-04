@@ -52,7 +52,12 @@ async def webui_page():
 
 @router.get("/api/system/status")
 async def api_status():
-    return JSONResponse({"active_clients": len(state.active_clients)})
+    managed_clients = sum(1 for client in state.active_clients if state.ws_node_managed.get(id(client), False))
+    return JSONResponse({
+        "active_clients": len(state.active_clients),
+        "managed_clients": managed_clients,
+        "legacy_clients": len(state.active_clients) - managed_clients,
+    })
 
 
 @router.get("/api/auth/session")

@@ -539,13 +539,21 @@ def build_gateway_stats(background_tasks_count: int) -> dict[str, Any]:
     now = time.time()
     nodes: list[dict[str, Any]] = []
     available_clients = 0
+    cooldown_clients = 0
     metrics = state.metrics
+    managed_client_count = sum(1 for client in state.active_clients if state.ws_node_managed.get(id(client), False))
+    legacy_client_count = len(state.active_clients) - managed_client_count
 
     for index, client in enumerate(state.active_clients):
         cooldown_until = state.client_cooldowns.get(id(client), 0)
-        is_available = cooldown_until <= now
+        is_managed = bool(state.ws_node_managed.get(id(client), False))
+        is_routable = is_managed if managed_client_count else True
+        is_cooling_down = cooldown_until > now
+        is_available = is_routable and not is_cooling_down
         if is_available:
             available_clients += 1
+        if is_cooling_down:
+            cooldown_clients += 1
 
         tracked_req_ids = state.ws_to_req_ids.get(id(client), set())
         node_key = node_label(client)
@@ -555,6 +563,9 @@ def build_gateway_stats(background_tasks_count: int) -> dict[str, Any]:
             "index": index,
             "node": node_key,
             "client_id": id(client),
+            "managed": is_managed,
+            "routable": is_routable,
+            "generation": state.ws_node_generations.get(id(client), 0),
             "available": is_available,
             "cooldown_until": int(cooldown_until) if cooldown_until > now else 0,
             "cooldown_remaining_seconds": max(0, int(cooldown_until - now)),
@@ -604,7 +615,10 @@ def build_gateway_stats(background_tasks_count: int) -> dict[str, Any]:
         "uptime_seconds": int(now - state.metrics_started_at),
         "active_clients": len(state.active_clients),
         "available_clients": available_clients,
-        "cooldown_clients": len(state.active_clients) - available_clients,
+        "managed_clients": managed_client_count,
+        "legacy_clients": legacy_client_count,
+        "cooldown_clients": cooldown_clients,
+        "non_routable_clients": len(state.active_clients) - available_clients - cooldown_clients,
         "pending_requests": len(state.pending_queues),
         "tracked_ws_request_sets": len(state.ws_to_req_ids),
         "background_tasks": background_tasks_count,

@@ -158,6 +158,8 @@ Authorization: Bearer <MIMO_NODE_TOKEN>
 x-node-token: <MIMO_NODE_TOKEN>
 ```
 
+manager 注入的桥接脚本会自动追加 `node_id=account:<userId>` 与 `node_generation=<timestamp>`。网关会对同一账号节点去重，只保留最新 generation；旧版未携带 `node_id` 的遗留节点默认最多保留 1 个，且一旦账号节点上线就不再参与路由。
+
 ## 使用 API
 
 ### OpenAI Chat Completions
@@ -338,7 +340,11 @@ permissions:
 | `MIMO_METRICS_DB_PATH` | 指标历史 SQLite 路径 | `gateway_metrics.db` |
 | `MIMO_METRICS_SNAPSHOT_PATH` | 累积指标快照路径 | `gateway_snapshot.json` |
 | `MIMO_PROCESS_LOCK_PATH` | 单进程锁路径 | `mimo2api.lock` |
-| `MIMO_NODE_401_COOLDOWN_SECONDS` | 节点 401 后冷却时间 | `900` |
+| `MIMO_NODE_401_COOLDOWN_SECONDS` | 节点 401/403 后冷却时间 | `900` |
+| `MIMO_NODE_RETRY_COOLDOWN_SECONDS` | 节点 429/5xx 后短冷却时间 | `60` |
+| `MIMO_NODE_INTERNAL_ERROR_COOLDOWN_SECONDS` | bridge 首包返回内部错误后的短冷却时间 | `60` |
+| `MIMO_MAX_LEGACY_NODES` | 未携带 `node_id` 的旧版桥接节点保留上限（无账号节点在线时） | `1` |
+| `MIMO_MAX_LEGACY_NODES_WHEN_MANAGED` | 账号节点已上线时旧版桥接节点保留上限 | `0` |
 | `MIMO_TTS_VOICE_MAP` | TTS voice JSON 映射覆盖 | 空 |
 
 ## 免责声明

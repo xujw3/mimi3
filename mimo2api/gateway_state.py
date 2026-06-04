@@ -15,6 +15,11 @@ class GatewayState:
         self.req_id_to_ws_id: Dict[str, int] = {}
         self.req_id_timestamps: Dict[str, float] = {}
         self.ws_node_labels: Dict[int, str] = {}
+        self.ws_node_ids: Dict[int, str] = {}
+        self.ws_node_generations: Dict[int, int] = {}
+        self.ws_node_managed: Dict[int, bool] = {}
+        self.node_id_to_ws: Dict[str, WebSocket] = {}
+        self.node_latest_generations: Dict[str, int] = {}
         self.current_client_index: int = 0
         self.rebuild_event: asyncio.Event = asyncio.Event()
         self.client_cooldowns: Dict[int, float] = {}
